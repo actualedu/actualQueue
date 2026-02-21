@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Stream Countdown</title>
+<style>
+  html,body{margin:0;padding:0;background:transparent}
+  #wrap{font-family:Arial,Helvetica,sans-serif;color:#fff;text-align:center}
+  #clock{font-size:64px;line-height:1.1}
+  #meta{font-size:18px;opacity:.85;margin-top:6px}
+  #controls{margin-top:10px}
+  input,button{font-size:18px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="clock">--:--:--</div>
+  <div id="meta">Loading…</div>
+  <div id="controls">
+    <input type="time" id="manual" />
+    <button id="startBtn">Start manual</button>
+  </div>
+</div>
+
+<script>
+const CAL_URL = "https://script.google.com/macros/s/AKfycbwJw15SQN4x_BY2GAK_e_QzW76D_VMnX_fCF5_2qDqT8Ph-rFIvc3_BXuToNpYMiPC_/exec";
+
+
+const clockEl = document.getElementById('clock');
+const meta = document.getElementById('meta');
+let timer = null;
+
+function fmt(ms){
+  if (ms < 0) ms = 0;
+  const s = Math.floor(ms/1000)%60;
+  const m = Math.floor(ms/60000)%60;
+  const h = Math.floor(ms/3600000);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+function runCountdown(end){
+  clearInterval(timer);
+  timer = setInterval(()=>{
+    const diff = end - new Date();
+    clockEl.textContent = diff <= 0 ? "00:00:00" : fmt(diff);
+    if (diff <= 0) clearInterval(timer);
+  }, 250);
+}
+
+async function tryFetchCalendar() {
+  // Timeout + cache-busting + no-store
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 8000); // 8s timeout
+  try {
+    const url = CAL_URL + (CAL_URL.includes('?') ? '&' : '?') + 'nocache=' + Date.now();
+    const res = await fetch(url, { signal: controller.signal, cache: "no-store" });
+    clearTimeout(t);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    if (data.active && data.endTime) {
+      const end = new Date(data.endTime);
+      runCountdown(end);
+      meta.textContent = `${(data.title||'Stream')} ends at ${end.toLocaleTimeString()}`;
+      return true;
+    } else {
+      meta.textContent = 'No active event (will retry)…';
+      return false;
+    }
+  } catch (e) {
+    clearTimeout(t);
+    meta.textContent = 'Calendar fetch failed; retrying…';
+    return false;
+  }
+}
+
+async function scheduler() {
+  const ok = await tryFetchCalendar();
+  setTimeout(scheduler, ok ? 15000 : 5000); // 30s if good, 5s if error/no event
+}
+scheduler();
+
+// Full page reload every 5 min (safety net for OBS/TikTok)
+setInterval(() => location.reload(), 1 * 60 * 1000);
+
+// Manual fallback
+document.getElementById('startBtn').addEventListener('click', ()=>{
+  const v = document.getElementById('manual').value;
+  if (!v) return;
+  const [hh, mm] = v.split(':').map(Number);
+  const end = new Date();
+  end.setHours(hh, mm, 0, 0);
+  if (end < new Date()) end.setDate(end.getDate() + 1);
+  runCountdown(end);
+  meta.textContent = `Manual end time: ${end.toLocaleTimeString()}`;
+});
+</script>
+</body>
+</html>
+

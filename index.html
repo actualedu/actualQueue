@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Submit Your Screenshot to Office Hours</title>
+
+  <style>
+    /* ===== Palette (from your screenshot) ===== */
+    :root{
+      --bg:    #0b1020;  /* page background */
+      --card:  #121933;  /* panels/cards/inputs */
+      --ok:    #42c17b;  /* success / primary (Upload) */
+      --err:   #ff6b6b;  /* error */
+      --text:  #e9eefc;  /* primary text */
+      --muted: #a4b1d1;  /* secondary text */
+
+      /* subtle borders & depths */
+      --border:#1f2a55;
+
+      /* Brand/CTA buttons */
+      --youtube:#FF0000;
+      --twitch: #9146FF;
+      --discord:#5865F2;
+      --schedule:#d5ac5a; /* requested color for Streaming Schedule */
+      --donate: #f59e0b;  /* amber donate CTA */
+      --linktree: #42e661;
+      --kudu: #3F51B5; 		
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body{
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px;
+      line-height: 1.45;
+    }
+
+    .container{
+      max-width: 780px;
+      margin: 0 auto;
+      background: var(--card);
+      padding: 28px 28px 22px 28px;
+      border-radius: 16px;
+      box-shadow: 0 16px 40px rgba(0,0,0,.35);
+      border: 1px solid var(--border);
+    }
+
+    h2{
+      text-align: center;
+      margin-bottom: 18px;
+      font-size: 32px;
+      letter-spacing: .2px;
+      color: var(--text);
+    }
+
+    label{
+      display: block;
+      margin: 14px 0 6px 0;
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    input[type="text"]{
+      width: 100%;
+      padding: 12px;
+      border-radius: 10px;
+      font-size: 16px;
+      background: #0f1630;       /* darker than card for depth */
+      color: var(--text);
+      border: 1px solid var(--border);
+      outline: none;
+    }
+    input[type="text"]::placeholder{ color: var(--muted); }
+    input[type="text"]:focus{
+      border-color: #2b8a5d;      /* derived from --ok */
+      box-shadow: 0 0 0 3px rgba(66,193,123,.25);
+    }
+
+    /* ===== Upload button (success green) ===== */
+    input[type="submit"]{
+      width: 100%;
+      padding: 14px;
+      background: var(--ok);      /* #42c17b */
+      border: none;
+      border-radius: 12px;
+      color: #07120c;             /* near-black for contrast on green */
+      font-size: 18px;
+      font-weight: 800;
+      cursor: pointer;
+      margin-top: 16px;
+      box-shadow: 0 4px 14px rgba(66,193,123,.30);
+      animation: uploadPulseLite 1.5s cubic-bezier(.22,.61,.36,1) infinite;
+      transition: transform .02s ease, filter .2s ease, background .2s ease;
+    }
+    input[type="submit"]:hover{ filter: brightness(1.05); }
+    input[type="submit"]:active{ transform: translateY(1px); }
+
+    @keyframes uploadPulseLite {
+      0%, 100% {
+        transform: scale(1);
+        filter: brightness(1);
+      }
+      50% {
+        transform: scale(1.04);
+        filter: brightness(1.16);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      input[type="submit"] { transition: none; animation: none; }
+    }
+
+    .success{ color: var(--ok); }
+
+    .button-container{
+      margin-top: 22px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
+      gap: 14px;
+    }
+    .button-container a{
+      display: inline-block;
+      text-align: center;
+      padding: 12px 16px;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 12px;
+      font-weight: 800;
+      border: 1px solid rgba(255,255,255,0.08);
+      transition: transform .02s ease, filter .2s ease;
+    }
+    .button-container a:hover{ filter: brightness(1.05); }
+    .button-container a:active{ transform: translateY(1px); }
+
+    /* Brand/CTA colored buttons */
+    .schedule{ background: var(--schedule); color:#1a1a1a; } /* dark text for contrast */
+    .twitch  { background: var(--twitch); }
+    .discord { background: var(--discord); }
+    .youtube { background: var(--youtube); }
+    .linktree { background: var(--linktree); }
+    .kudu { background: var(--kudu); }
+    .donate  { background: var(--donate); color:#1a1a1a; }
+    .queue {background: #42c1e0;  color: #0b1020;}
+
+    .build-version{
+      margin-top: 12px;
+      text-align: right;
+      color: rgba(164,177,209,.7);
+      font-size: 11px;
+      letter-spacing: .2px;
+    }
+
+    /* Drag-and-drop */
+    .drop-zone{
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      padding: 22px;
+      text-align: center;
+      color: var(--muted);
+      cursor: pointer;
+      margin-bottom: 12px;
+      transition: background .2s, border-color .2s, color .2s, box-shadow .2s;
+      background: #0f1630;
+    }
+    .drop-zone p{ margin: 2px 0; }
+    .drop-zone .hint{ color: var(--muted) !important; }
+    .drop-zone.highlight{
+      background: rgba(66,193,123,.10);
+      border-color: var(--ok);
+      color: var(--text);
+      box-shadow: 0 0 0 3px rgba(66,193,123,.20) inset;
+    }
+
+    .camera-row{
+      text-align: center;
+      margin: -2px 0 14px 0;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .camera-btn{
+      display: inline-block;
+      padding: 8px 14px;
+      border-radius: 10px;
+      background: #0f1630;
+      color: var(--text);
+      text-decoration: none;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      transition: background .2s, border-color .2s, box-shadow .2s;
+    }
+    .camera-btn:hover{ background:#101a38; }
+    .camera-btn:focus{
+      outline: none;
+      border-color: var(--ok);
+      box-shadow: 0 0 0 3px rgba(66,193,123,.25);
+    }
+
+    @media (max-width: 600px){
+      .container{ padding: 20px; }
+      input[type="text"], input[type="submit"], .button-container a{ font-size: 16px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h2>Submit Your Screenshot to Office Hours</h2>
+
+    <form action="upload.php" method="post" enctype="multipart/form-data">
+      <label for="username">Username:</label>
+      <input type="text" name="username" id="username" placeholder="Enter your username" required />
+      <!-- Honeypot (bots fill everything) -->
+      <input type="text" name="website" value="" style="display:none" tabindex="-1" autocomplete="off">
+      <!-- CSRF token -->
+      <input type="hidden" name="csrf" id="csrf" value="">
+
+      <label for="image">Select Image:</label>
+      <!-- keeps backend name="image" -->
+      <input
+        type="file"
+        name="image"
+        id="image"
+        accept="image/*,.png,.jpg,.jpeg,.gif,.webp,.heic,.heif"
+        style="display:none"
+        required
+      />
+
+      <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Upload image by clicking or dragging">
+        <p><strong>Drag & Drop</strong> your image here, or <u>click</u> to choose a file.</p>
+        <p class="hint" style="font-size:12px; margin-top:6px;">PNG, JPG, GIF, WEBP, HEIC supported</p>
+      </div>
+
+      <div class="camera-row">
+        <label for="cameraInput" class="camera-btn">📷 Take a photo</label>
+        <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none" />
+      </div>
+
+      <input type="submit" value="Upload" />
+    </form>
+ <script>
+  fetch('upload.php?action=csrf', { credentials: 'same-origin' })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var el = document.getElementById('csrf');
+      if (el && d && d.token) el.value = d.token;
+    });
+</script>
+
+
+    <div class="button-container">
+
+     <a href="https://www.actualdiscord.com/submit/stats.php" class="queue" id="liveQueueBtn" target="_blank" rel="noopener noreferrer">Live Queue</a>
+      <a href="https://calendar.actual.education" class="schedule" target="_blank" rel="noopener noreferrer">Streaming Schedule</a>
+      <a href="https://twitch.tv/actualeducation" class="twitch" target="_blank" rel="noopener noreferrer">Watch Live on Twitch</a>
+      <a href="https://discord.gg/s7R9zjSxrA" class="discord" target="_blank" rel="noopener noreferrer">Join Our Discord</a>
+      <a href="https://www.youtube.com/@actual.education" class="youtube" target="_blank" rel="noopener noreferrer">Visit Our YouTube</a>
+      <a href="https://www.pledge.to/givingtuesday-24-hour-livestream-tutoring-fundraiser" class="donate" target="_blank" rel="noopener noreferrer">Donate</a>
+      <a href="https://linktree.com/actualeducation/" class="linktree" target="_blank" rel="noopener noreferrer">Bio</a>
+      <a href="https://www.actualeducation.net/actualmath" class="kudu" target="_blank" rel="noopener noreferrer">Math Bootcamp</a>
+
+    </div>
+    <div class="build-version">build 2026-02-18.01</div>
+  </div>
+
+  <script>
+    (function () {
+      const hiddenInput = document.getElementById('image');
+      const dropZone    = document.getElementById('dropZone');
+      const cameraInput = document.getElementById('cameraInput');
+
+      function setDropZoneMessage(name){
+        if(!dropZone) return;
+        while (dropZone.firstChild) dropZone.removeChild(dropZone.firstChild);
+
+        var p1 = document.createElement('p');
+        var strong = document.createElement('strong');
+        strong.textContent = 'Selected:';
+        p1.appendChild(strong);
+        p1.appendChild(document.createTextNode(' ' + (name || 'image')));
+
+        var p2 = document.createElement('p');
+        p2.className = 'hint';
+        p2.style.fontSize = '12px';
+        p2.style.marginTop = '6px';
+        p2.textContent = 'Ready to upload';
+
+        dropZone.appendChild(p1);
+        dropZone.appendChild(p2);
+      }
+
+      function setHiddenInputFiles(fileList){
+        if(!hiddenInput || !fileList || !fileList.length) return false;
+        try {
+          hiddenInput.files = fileList;
+          return !!(hiddenInput.files && hiddenInput.files.length);
+        } catch (_err) {
+          return false;
+        }
+      }
+
+      function assignFiles(files){
+        if(!files || !files.length) return;
+
+        if (!setHiddenInputFiles(files)) {
+          try {
+            if (typeof DataTransfer !== 'undefined') {
+              var dt = new DataTransfer();
+              dt.items.add(files[0]);
+              setHiddenInputFiles(dt.files);
+            }
+          } catch (_err2) {
+            return;
+          }
+        }
+
+        var assigned = hiddenInput && hiddenInput.files && hiddenInput.files.length
+          ? hiddenInput.files[0]
+          : files[0];
+        setDropZoneMessage(assigned && assigned.name ? assigned.name : 'image');
+      }
+
+      dropZone.addEventListener('click', () => hiddenInput.click());
+      dropZone.addEventListener('keydown', (e) => {
+        if(e.key === 'Enter' || e.key === ' '){
+          e.preventDefault();
+          hiddenInput.click();
+        }
+      });
+
+      hiddenInput.addEventListener('change', () => {
+        var f = hiddenInput.files && hiddenInput.files.length ? hiddenInput.files[0] : null;
+        if (f) setDropZoneMessage(f.name || 'image');
+      });
+
+      ['dragenter','dragover'].forEach(evt =>
+        dropZone.addEventListener(evt, (e) => {
+          e.preventDefault(); e.stopPropagation();
+          dropZone.classList.add('highlight');
+        })
+      );
+      ['dragleave','drop'].forEach(evt =>
+        dropZone.addEventListener(evt, (e) => {
+          e.preventDefault(); e.stopPropagation();
+          dropZone.classList.remove('highlight');
+        })
+      );
+      dropZone.addEventListener('drop', (e) => {
+        const files = e.dataTransfer.files;
+        if(files && files.length) assignFiles(files);
+      });
+
+      if(cameraInput){
+        cameraInput.addEventListener('change', () => assignFiles(cameraInput.files));
+      }
+
+      var liveQueueBtn = document.getElementById('liveQueueBtn');
+      var queueBaseText = liveQueueBtn ? liveQueueBtn.textContent : 'Live Queue';
+      var queueCountBusy = false;
+
+      function setQueueCountLabel(count){
+        if (!liveQueueBtn) return;
+        var n = parseInt(count, 10);
+        if (!(n >= 0)) {
+          liveQueueBtn.textContent = queueBaseText;
+          return;
+        }
+        liveQueueBtn.textContent = queueBaseText + ' (' + n + ')';
+      }
+
+      function refreshQueueCount(){
+        if (!liveQueueBtn || queueCountBusy || document.hidden) return;
+        queueCountBusy = true;
+
+        var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        var timeout = controller ? setTimeout(function(){ controller.abort(); }, 5000) : null;
+
+        fetch('queue.php', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          signal: controller ? controller.signal : undefined
+        })
+          .then(function(res){ if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+          .then(function(data){
+            if (Array.isArray(data)) setQueueCountLabel(data.length);
+          })
+          .catch(function(){ /* keep base label on failure */ })
+          .then(function(){
+            if (timeout) clearTimeout(timeout);
+            queueCountBusy = false;
+          });
+      }
+
+      refreshQueueCount();
+      setInterval(refreshQueueCount, 10000);
+      document.addEventListener('visibilitychange', function(){
+        if (!document.hidden) refreshQueueCount();
+      });
+    })();
+  </script>
+</body>
+</html>
