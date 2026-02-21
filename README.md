@@ -74,7 +74,7 @@ This app powers a live office-hours workflow where students submit screenshots, 
 - Each non-winner entry accumulates base votes over time.
 - Formula used in both admin and student views:
   - `baseVotes = 10 + floor(ageMinutes * 2)`
-  - final votes apply an upvote multiplier: `floor(baseVotes * 1.25^upvotes)`
+  - final votes apply a logarithmic upvote boost: `floor(baseVotes * (1 + log(upvotes + 1)))`
 - Winner entries are excluded from future vote growth/upvotes.
 
 ## API Endpoints
