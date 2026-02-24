@@ -108,6 +108,11 @@ This app powers a live office-hours workflow where students submit screenshots, 
 - Configure Discord webhook secrets via environment variables:
   - `DISCORD_FORUM_WEBHOOK` (used by `admin.php` forum posting to selected items)
   - `DISCORD_WEBHOOK` (used by `fwdDiscord.php` to forward all submitted images to a separate/private channel)
+- Discord forum tag IDs used by `admin.php`:
+  - `OFFICE_HOURS_TAG_ID`: applied to normal posts created from queue actions.
+  - `UNSOLVED_TAG_ID`: optional additional tag for unresolved items.
+  - These are currently defined in `admin.php` as constants. Update the values there to match your forum's tag IDs.
+  - To get a tag ID in Discord, enable Developer Mode, right-click the forum tag, and copy its ID.
 - You can optionally configure YouTube timestamp links in admin Discord posts with:
   - `YOUTUBE_API_KEY`
   - `YOUTUBE_CHANNEL_ID`
