@@ -9,7 +9,6 @@
 // =====================================================================
 
 $__discord_webhook = getenv('DISCORD_WEBHOOK');
-if (!$__discord_webhook) $__discord_webhook = getenv('DISCORD_FORUM_WEBHOOK');
 define('WEBHOOK_URL', is_string($__discord_webhook) ? $__discord_webhook : '');
 unset($__discord_webhook);
 define('FWD_LOG', __DIR__ . '/logs/fwd_error.log');

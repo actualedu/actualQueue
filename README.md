@@ -106,8 +106,8 @@ This app powers a live office-hours workflow where students submit screenshots, 
 - `admin.php` uses `forumWebhook.php` to post queue items into a Discord forum webhook.
 - `upload.php` also attempts best-effort forwarding through `fwdDiscord.php`/webhook helpers.
 - Configure Discord webhook secrets via environment variables:
-  - `DISCORD_FORUM_WEBHOOK` (used by `admin.php` forum posting)
-  - `DISCORD_WEBHOOK` (used by `fwdDiscord.php`; falls back to `DISCORD_FORUM_WEBHOOK`)
+  - `DISCORD_FORUM_WEBHOOK` (used by `admin.php` forum posting to selected items)
+  - `DISCORD_WEBHOOK` (used by `fwdDiscord.php` to forward all submitted images to a separate/private channel)
 - You can optionally configure YouTube timestamp links in admin Discord posts with:
   - `YOUTUBE_API_KEY`
   - `YOUTUBE_CHANNEL_ID`
@@ -134,9 +134,9 @@ Define these in your server environment (or via a `.env` loader if your stack us
   - Fallback admin password if `CONNECT_QUEUE_ADMIN_KEY` is not set.
 - `DISCORD_FORUM_WEBHOOK` (recommended)
   - Discord forum webhook URL used by `admin.php` when posting queue items/mark-done actions.
-- `DISCORD_WEBHOOK` (optional)
-  - Webhook used by `fwdDiscord.php` for upload forwarding.
-  - If not set, `fwdDiscord.php` falls back to `DISCORD_FORUM_WEBHOOK`.
+- `DISCORD_WEBHOOK` (optional but recommended)
+  - Dedicated webhook used by `fwdDiscord.php` for automatic upload forwarding.
+  - Does not fall back to `DISCORD_FORUM_WEBHOOK`.
 - `YOUTUBE_API_KEY` (optional)
   - YouTube Data API key used to build timestamped live links in admin Discord posts.
 - `YOUTUBE_CHANNEL_ID` (optional)
