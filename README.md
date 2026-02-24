@@ -42,12 +42,13 @@ This app powers a live office-hours workflow where students submit screenshots, 
 - Polls `queue.php` every 3 seconds.
 - Displays each entry with:
   - Username
-  - Posted time
+  - Submitted time
+  - Time in queue (minutes, shown prominently)
   - Vote count
   - Odds percentage
   - Link to the uploaded image
 - Supports public upvotes via `POST queue.php?upvote=1`.
-- Upvotes have a per-IP 3-minute cooldown (stored in `logs/upvote_rate.json`).
+- Upvotes have a per-question global 3-minute cooldown. Once a specific question is upvoted, only that question is locked until its timer expires.
 - If a winner is selected by admin, the page animates a spin wheel based on saved `logs/spin.json` data.
 
 ## Admin Side (`admin.php`)
@@ -88,7 +89,7 @@ This app powers a live office-hours workflow where students submit screenshots, 
 
 - `GET queue.php` -> sanitized public queue entries
 - `GET queue.php?spin=1` -> latest spin event payload
-- `POST queue.php?upvote=1` -> upvote response JSON
+- `POST queue.php?upvote=1` -> upvote response JSON (per-question 3-minute cooldown)
 - `GET queue.php?full=1` -> full queue data (admin session required)
 
 ## Storage Layout
@@ -96,7 +97,7 @@ This app powers a live office-hours workflow where students submit screenshots, 
 - `uploadedImages/` - uploaded screenshots
 - `logs/submissions.json` - queue source of truth
 - `logs/spin.json` - latest spin event for wheel animation
-- `logs/upvote_rate.json` - upvote cooldown timestamps by IP
+- `logs/upvote_rate.json` - upvote cooldown timestamps keyed by question entry key
 - `rate_limit/` - submit cooldown marker files by IP
 - `logs/*.log` - operational/error logs
 

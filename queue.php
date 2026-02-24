@@ -4,7 +4,7 @@
  *
  * Public:  GET  queue.php           -> safe fields only (username, ts, path, winner, upvotes, entry_key)
  * Public:  GET  queue.php?spin=1    -> latest spin event payload
- * Public:  POST queue.php?upvote=1  -> upvote a queue entry (3 min cooldown per IP)
+ * Public:  POST queue.php?upvote=1  -> upvote a queue entry (3 min cooldown per entry)
  * Admin:   GET  queue.php?full=1    -> all fields (requires active admin session)
  */
 
@@ -58,23 +58,6 @@ if (!empty($_GET['upvote'])) {
     exit;
   }
 
-  $rate = read_json_file(UPVOTE_RATE_FILE);
-  $ip = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : 'unknown';
-  $now = time();
-  $last = isset($rate[$ip]) ? (int)$rate[$ip] : 0;
-  $elapsed = $now - $last;
-  if ($elapsed < UPVOTE_COOLDOWN_SECONDS) {
-    $remaining = UPVOTE_COOLDOWN_SECONDS - $elapsed;
-    echo json_encode(array(
-      'ok' => false,
-      'error' => 'Cooldown active',
-      'cooldown_remaining' => $remaining,
-      'next_allowed_ts' => $last + UPVOTE_COOLDOWN_SECONDS,
-      'entry_key' => $entryKey
-    ));
-    exit;
-  }
-
   $matchIndex = -1;
   for ($i = 0; $i < count($entries); $i++) {
     if (entry_key($entries[$i]) === $entryKey) {
@@ -95,9 +78,27 @@ if (!empty($_GET['upvote'])) {
     exit;
   }
 
+  $rate = read_json_file(UPVOTE_RATE_FILE);
+  $now = time();
+  $canonicalKey = entry_key($entries[$matchIndex]);
+  $last = isset($rate[$canonicalKey]) ? (int)$rate[$canonicalKey] : 0;
+  $elapsed = $now - $last;
+  if ($elapsed < UPVOTE_COOLDOWN_SECONDS) {
+    $remaining = UPVOTE_COOLDOWN_SECONDS - $elapsed;
+    echo json_encode(array(
+      'ok' => false,
+      'error' => 'Cooldown active',
+      'cooldown_remaining' => $remaining,
+      'next_allowed_ts' => $last + UPVOTE_COOLDOWN_SECONDS,
+      'entry_key' => $canonicalKey
+    ));
+    exit;
+  }
+
   $current = isset($entries[$matchIndex]['upvotes']) ? (int)$entries[$matchIndex]['upvotes'] : 0;
   $entries[$matchIndex]['upvotes'] = $current + 1;
-  $rate[$ip] = $now;
+  $entries[$matchIndex]['last_upvote_ts'] = $now;
+  $rate[$canonicalKey] = $now;
 
   $savedQueue = write_json_file(SUBMISSIONS_FILE, array_values($entries));
   $savedRate = write_json_file(UPVOTE_RATE_FILE, $rate);
@@ -112,7 +113,7 @@ if (!empty($_GET['upvote'])) {
     'ok' => true,
     'cooldown_remaining' => UPVOTE_COOLDOWN_SECONDS,
     'next_allowed_ts' => $now + UPVOTE_COOLDOWN_SECONDS,
-    'entry_key' => $entryKey
+    'entry_key' => $canonicalKey
   ));
   exit;
 }
@@ -134,6 +135,12 @@ foreach ($entries as $e) {
     'winner'   => !empty($e['winner']),
     'winner_ts'=> isset($e['winner_ts']) ? (int)$e['winner_ts'] : 0,
     'upvotes'  => isset($e['upvotes']) ? (int)$e['upvotes'] : 0,
+    'last_upvote_ts' => isset($e['last_upvote_ts']) ? (int)$e['last_upvote_ts'] : 0,
+    'upvote_cooldown_until' => (
+      isset($e['last_upvote_ts']) && (int)$e['last_upvote_ts'] > 0
+      ? ((int)$e['last_upvote_ts'] + UPVOTE_COOLDOWN_SECONDS)
+      : 0
+    ),
     'entry_key'=> entry_key($e)
   );
 }

@@ -1,6 +1,6 @@
 <?php
 header('X-Content-Type-Options: nosniff');
-$build_version = '2026-02-18.01';
+$build_version = '2026-02-24.01';
 ?><!DOCTYPE html>
 <html lang="en">
 <head>
@@ -91,7 +91,20 @@ $build_version = '2026-02-18.01';
   .row-inner{ position:relative; z-index:1; display:flex; justify-content:space-between; gap:10px; align-items:center; }
   .name{ font-weight:700; display:flex; align-items:center; gap:8px; }
   .name .star{ color:var(--gold); text-shadow:0 0 10px rgba(249,199,79,.5); }
+  .posted-wrap{ display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .posted{ color:var(--muted); font-size:12px; font-weight:500; }
+  .queue-minutes{
+    color:#062133;
+    background:linear-gradient(180deg, rgba(99,215,255,.95), rgba(99,215,255,.78));
+    border:1px solid rgba(99,215,255,.55);
+    border-radius:999px;
+    padding:2px 9px;
+    font-size:12px;
+    font-weight:800;
+    letter-spacing:.1px;
+    box-shadow:0 0 0 1px rgba(4,12,28,.24) inset;
+    white-space:nowrap;
+  }
   .meta{ color:var(--muted); font-size:13px; white-space:nowrap; display:flex; align-items:center; gap:10px; }
   .empty{ color:var(--muted); padding:16px 10px; }
   a.name-link{ color:inherit; text-decoration:none; }
@@ -172,7 +185,7 @@ $build_version = '2026-02-18.01';
 
   <main class="page" role="main">
     <section class="wrap">
-      <div class="sub">Upvote every 3 minutes to boost your odds. Questions gain votes over time, so those waiting are more likely to be picked.</div>
+      <div class="sub">Each question can be upvoted once every 3 minutes. Questions gain votes over time, so those waiting are more likely to be picked.</div>
       <div class="board" id="board" aria-live="polite"></div>
       <div class="footer-meta">
         <div class="updated-at" id="updated">Updated --</div>
@@ -221,6 +234,12 @@ function formatPostedTime(tsUnix){
   return new Date(tsUnix * 1000).toLocaleTimeString();
 }
 
+function formatQueueMinutes(tsUnix){
+  if (!tsUnix) return '';
+  var mins = Math.max(0, Math.floor((nowUnix() - tsUnix) / 60));
+  return mins + ' min in queue';
+}
+
 function safeText(v){ return (v == null ? '' : String(v)).replace(/[<>]/g,''); }
 
 var lastSpinTs = 0;
@@ -264,17 +283,6 @@ async function fetchJson(url, options, timeoutMs){
   }
 }
 
-function localCooldownUntil(){
-  var raw = localStorage.getItem('queue_upvote_cooldown_until');
-  var ts = raw ? parseInt(raw, 10) : 0;
-  return ts > 0 ? ts : 0;
-}
-
-function setLocalCooldown(seconds){
-  var until = Math.floor(nowUnix()) + Math.max(0, seconds || 0);
-  localStorage.setItem('queue_upvote_cooldown_until', String(until));
-}
-
 function formatCooldown(seconds){
   var s = Math.max(0, seconds || 0);
   var m = Math.floor(s / 60);
@@ -294,12 +302,12 @@ function formatElapsed(seconds){
 
 function refreshUpvoteButtons(){
   var now = Math.floor(nowUnix());
-  var until = localCooldownUntil();
-  var cooldown = Math.max(0, until - now);
   var buttons = document.querySelectorAll('.upvote-btn');
   for (var i=0; i<buttons.length; i++) {
     var btn = buttons[i];
     var isWinner = btn.getAttribute('data-winner') === '1';
+    var until = parseInt(btn.getAttribute('data-cooldown-until') || '0', 10);
+    var cooldown = Math.max(0, until - now);
     var disabled = upvoteBusy || isSpinning || isWinner || cooldown > 0;
     btn.disabled = disabled;
     if (isWinner) {
@@ -347,6 +355,7 @@ function rankedEntries(rawEntries){
       winnerTs: winnerSince,
       upvotes: e.upvotes ? parseInt(e.upvotes, 10) : 0,
       entryKey: e.entry_key || '',
+      upvoteCooldownUntil: e.upvote_cooldown_until ? parseInt(e.upvote_cooldown_until, 10) : 0,
       votes: v,
       odds: voteTotal > 0 ? (v * 100 / voteTotal) : 0
     });
@@ -384,12 +393,20 @@ function renderBoard(rawEntries){
     var href = toUrl(e.path);
     var star = e.winner ? '<span class="star">&#11088;</span>' : '';
     var posted = formatPostedTime(e.ts);
+    var queueMins = formatQueueMinutes(e.ts);
+    var postedMeta = '';
+    if (posted || queueMins) {
+      postedMeta = '<span class="posted-wrap">' +
+        (posted ? '<span class="posted">Submitted ' + posted + '</span>' : '') +
+        (queueMins ? '<span class="queue-minutes">' + queueMins + '</span>' : '') +
+      '</span>';
+    }
     html += '' +
       '<div class="row">' +
         '<div class="vote-bar" style="width:' + width.toFixed(2) + '%"></div>' +
         '<div class="row-inner">' +
-          '<div class="name">' + star + '<a class="name-link" href="' + href + '" target="_blank" rel="noopener noreferrer">' + e.username + '</a>' + (posted ? '<span class="posted">' + posted + '</span>' : '') + '</div>' +
-          '<div class="meta"><span>' + e.votes + ' votes | ' + e.odds.toFixed(1) + '%</span><button class="upvote-btn" data-entry-key="' + e.entryKey + '" data-winner="' + (e.winner ? '1' : '0') + '">Upvote</button>' + (e.winner ? '<span class="winner-worked" data-winner-since="' + (e.winnerTs || 0) + '"></span>' : '') + '</div>' +
+          '<div class="name">' + star + '<a class="name-link" href="' + href + '" target="_blank" rel="noopener noreferrer">' + e.username + '</a>' + postedMeta + '</div>' +
+          '<div class="meta"><span>' + e.votes + ' votes | ' + e.odds.toFixed(1) + '%</span><button class="upvote-btn" data-entry-key="' + e.entryKey + '" data-winner="' + (e.winner ? '1' : '0') + '" data-cooldown-until="' + (e.upvoteCooldownUntil || 0) + '">Upvote</button>' + (e.winner ? '<span class="winner-worked" data-winner-since="' + (e.winnerTs || 0) + '"></span>' : '') + '</div>' +
         '</div>' +
       '</div>';
   }
@@ -553,12 +570,6 @@ async function fetchQueue(){
 
 async function submitUpvote(entryKey){
   if (!entryKey || upvoteBusy || isSpinning) return;
-  var now = Math.floor(nowUnix());
-  var until = localCooldownUntil();
-  if (until > now) {
-    refreshUpvoteButtons();
-    return;
-  }
   upvoteBusy = true;
   refreshUpvoteButtons();
   try {
@@ -571,18 +582,9 @@ async function submitUpvote(entryKey){
     syncServerTimeFromResponse(res);
     var payload = await res.json();
     if (payload && payload.ok) {
-      if (payload.next_allowed_ts) {
-        localStorage.setItem('queue_upvote_cooldown_until', String(parseInt(payload.next_allowed_ts, 10) || 0));
-      } else {
-        setLocalCooldown(180);
-      }
       await fetchQueue();
     } else if (payload && payload.cooldown_remaining) {
-      if (payload.next_allowed_ts) {
-        localStorage.setItem('queue_upvote_cooldown_until', String(parseInt(payload.next_allowed_ts, 10) || 0));
-      } else {
-        setLocalCooldown(parseInt(payload.cooldown_remaining, 10) || 0);
-      }
+      await fetchQueue();
     }
   } catch (err) {
     console.error(err);
