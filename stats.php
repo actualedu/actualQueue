@@ -237,7 +237,7 @@ function formatPostedTime(tsUnix){
 function formatQueueMinutes(tsUnix){
   if (!tsUnix) return '';
   var mins = Math.max(0, Math.floor((nowUnix() - tsUnix) / 60));
-  return mins + ' min in queue';
+  return mins + ' min';
 }
 
 function safeText(v){ return (v == null ? '' : String(v)).replace(/[<>]/g,''); }
