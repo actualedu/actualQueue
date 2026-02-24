@@ -124,6 +124,28 @@ This app powers a live office-hours workflow where students submit screenshots, 
 
 Use `permcheck.php` if you need permission diagnostics.
 
+## Environment Variables (`.env` / Server Env)
+
+Define these in your server environment (or via a `.env` loader if your stack uses one):
+
+- `CONNECT_QUEUE_ADMIN_KEY` (required)
+  - Primary admin password used by `admin.php` login.
+- `CONNECT_ADMIN_SECRET` (optional fallback)
+  - Fallback admin password if `CONNECT_QUEUE_ADMIN_KEY` is not set.
+- `DISCORD_FORUM_WEBHOOK` (recommended)
+  - Discord forum webhook URL used by `admin.php` when posting queue items/mark-done actions.
+- `DISCORD_WEBHOOK` (optional)
+  - Webhook used by `fwdDiscord.php` for upload forwarding.
+  - If not set, `fwdDiscord.php` falls back to `DISCORD_FORUM_WEBHOOK`.
+- `YOUTUBE_API_KEY` (optional)
+  - YouTube Data API key used to build timestamped live links in admin Discord posts.
+- `YOUTUBE_CHANNEL_ID` (optional)
+  - Channel ID paired with `YOUTUBE_API_KEY` for live stream lookup.
+
+Notes:
+- At least one admin key must exist: `CONNECT_QUEUE_ADMIN_KEY` or `CONNECT_ADMIN_SECRET`.
+- Keep all webhook URLs and keys out of source control.
+
 ## Notes
 
 - This is a file-backed app (JSON/files), not a DB-backed app.
