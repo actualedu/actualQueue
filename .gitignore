@@ -1,1 +1,19 @@
 .DS_Store
+
+# Local environment config
+.env
+.env.*
+
+# Runtime/generated app data
+logs/*.log
+logs/*.json
+logs/*.csv
+logs/test_write
+logs/.hash-*
+rate_limit/*.txt
+rate_limit/.last_cleanup
+uploadedImages/*
+submissions/*
+
+# Keep directory hardening/rules files if present
+!logs/.htaccess

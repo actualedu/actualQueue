@@ -41,7 +41,7 @@ define('YOUTUBE_CHANNEL_ID', getenv('YOUTUBE_CHANNEL_ID') ? getenv('YOUTUBE_CHAN
 // === Discord forum webhook config ===
 require_once __DIR__ . '/forumWebhook.php';
 
-$DISCORD_FORUM_WEBHOOK = "https://discord.com/api/webhooks/1431381616294363178/8ZIhEro-OHDSj4MEZ8TsGCdzX2Q5FlRDSLPok0PmeaFaWPfSZR3NFrjMWZ4i3zIw6JQE";
+$DISCORD_FORUM_WEBHOOK = getenv('DISCORD_FORUM_WEBHOOK') ? getenv('DISCORD_FORUM_WEBHOOK') : '';
 
 define('OFFICE_HOURS_TAG_ID', '1427946399839813632');
 if (!defined('UNSOLVED_TAG_ID')) { define('UNSOLVED_TAG_ID', '1431154094713868368'); }
@@ -59,6 +59,9 @@ if (!function_exists('hash_equals')) {
 }
 
 alog("=== ADMIN LOAD ===");
+if ($DISCORD_FORUM_WEBHOOK === '') {
+  alog("Discord forum webhook missing: DISCORD_FORUM_WEBHOOK is not set");
+}
 alog("YT env check: keyLen=" . strlen(getenv('YOUTUBE_API_KEY')) .
      " channelId=" . getenv('YOUTUBE_CHANNEL_ID'));
 

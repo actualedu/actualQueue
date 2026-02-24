@@ -105,6 +105,9 @@ This app powers a live office-hours workflow where students submit screenshots, 
 
 - `admin.php` uses `forumWebhook.php` to post queue items into a Discord forum webhook.
 - `upload.php` also attempts best-effort forwarding through `fwdDiscord.php`/webhook helpers.
+- Configure Discord webhook secrets via environment variables:
+  - `DISCORD_FORUM_WEBHOOK` (used by `admin.php` forum posting)
+  - `DISCORD_WEBHOOK` (used by `fwdDiscord.php`; falls back to `DISCORD_FORUM_WEBHOOK`)
 - You can optionally configure YouTube timestamp links in admin Discord posts with:
   - `YOUTUBE_API_KEY`
   - `YOUTUBE_CHANNEL_ID`

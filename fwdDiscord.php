@@ -8,7 +8,10 @@
 // Logs to logs/fwd_error.log
 // =====================================================================
 
-define('WEBHOOK_URL', 'https://discord.com/api/webhooks/1344288823328374855/UJnpt0K0yGe3fA0XsTF4142nmlvoBsDV6J9bDq2g8by4Es_wqIu1wKC2VJGkrJSXcLsP'); // <-- paste your Discord webhook URL
+$__discord_webhook = getenv('DISCORD_WEBHOOK');
+if (!$__discord_webhook) $__discord_webhook = getenv('DISCORD_FORUM_WEBHOOK');
+define('WEBHOOK_URL', is_string($__discord_webhook) ? $__discord_webhook : '');
+unset($__discord_webhook);
 define('FWD_LOG', __DIR__ . '/logs/fwd_error.log');
 
 function respond($code, $arr) {
@@ -97,4 +100,3 @@ if ($method === 'POST' && !empty($_POST['path'])) {
 }
 
 respond(400, array('ok'=>false,'error'=>'No file provided'));
-
