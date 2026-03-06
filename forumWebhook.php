@@ -1,6 +1,6 @@
 <?php
 /**
- * forumWebhook.php — helper for posting to a Discord FORUM via webhook.
+ * forumWebhook.php  helper for posting to a Discord FORUM via webhook.
  * PHP 5.6 compatible.
  *
  * Usage:
@@ -19,9 +19,15 @@ if (!function_exists('post_to_discord_forum')) {
     // Add $contentOverride (optional) as 5th arg
     function post_to_discord_forum($webhookUrl, $threadTitle, $imagePath, $tagId, $contentOverride = '') {
         if (!is_string($webhookUrl) || $webhookUrl === '') return false;
+        if (!function_exists('curl_init')) return false;
         if (!is_string($threadTitle) || $threadTitle === '') $threadTitle = 'Submission';
 
         $hasImage = (is_string($imagePath) && $imagePath !== '' && file_exists($imagePath));
+        $canAttachFile = class_exists('CURLFile') || function_exists('curl_file_create');
+        if ($hasImage && !$canAttachFile) {
+            // Fall back to a text-only post if file uploads are unavailable.
+            $hasImage = false;
+        }
         $filename = $hasImage ? basename($imagePath) : null;
 
         // Base payload (allow override)
@@ -59,7 +65,11 @@ if (!function_exists('post_to_discord_forum')) {
             'payload_json' => json_encode($payload)
         );
         if ($hasImage) {
-            $multipart['files[0]'] = new CURLFile($imagePath, mime_content_type_safe($imagePath), $filename);
+            if (class_exists('CURLFile')) {
+                $multipart['files[0]'] = new CURLFile($imagePath, mime_content_type_safe($imagePath), $filename);
+            } else {
+                $multipart['files[0]'] = curl_file_create($imagePath, mime_content_type_safe($imagePath), $filename);
+            }
         }
 
         // Ask Discord to return JSON of the created message (contains channel_id of the new thread)

@@ -23,7 +23,7 @@ function flog($msg, $ctx = array()) {
   $line = '['.date('c').'] '.$msg.(empty($ctx)?'':' '.json_encode($ctx)).PHP_EOL;
   @file_put_contents(FWD_LOG, $line, FILE_APPEND);
 }
-function sniff_mime($path) {
+function fwd_sniff_mime($path) {
   if (class_exists('finfo')) { $fi=new finfo(FILEINFO_MIME_TYPE); $m=$fi->file($path); if ($m) return $m; }
   if (function_exists('mime_content_type')) { $m=@mime_content_type($path); if ($m) return $m; }
   return 'application/octet-stream';
@@ -41,7 +41,7 @@ function send_to_discord_webhook($filePath, $postNameForDiscord, $usernameForMes
   if (!is_file($filePath) || !is_readable($filePath)) { flog('File missing/unreadable',array('path'=>$filePath)); return array(false,'File not found'); }
   if (!function_exists('curl_init')) { flog('cURL not available'); return array(false,'cURL not available'); }
 
-  $mime = sniff_mime($filePath);
+  $mime = fwd_sniff_mime($filePath);
   $cfile = make_curl_file($filePath, $mime, $postNameForDiscord);
 
   $payload = array(

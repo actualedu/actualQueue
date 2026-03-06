@@ -205,18 +205,36 @@ $build_version = '2026-02-24.01';
 <script>
 function toUrl(p){
   if(!p) return '#';
-  p = String(p);
+  p = String(p).replace(/\\/g, '/');
   try { if (new URL(p).protocol.indexOf('http') === 0) return p; } catch(e){}
-  if (p.indexOf('/submit/') === 0) return p;
+
+  // Build app-relative URLs from wherever stats.php is hosted.
+  var dir = '/';
+  var pathname = window.location.pathname || '/';
+  var slashIdx = pathname.lastIndexOf('/');
+  if (slashIdx >= 0) dir = pathname.slice(0, slashIdx + 1);
+
+  if (p.charAt(0) === '/') return p;
+
   var needle = '/public_html/';
   var idx = p.indexOf(needle);
   if (idx !== -1){
-    var rel = p.slice(idx + needle.length);
-    if (rel.charAt(0) !== '/') rel = '/' + rel;
-    return rel;
+    var rel = p.slice(idx + needle.length).replace(/^\/+/, '');
+    return '/' + rel;
   }
+
+  var uploadIdx = p.indexOf('/uploadedImages/');
+  if (uploadIdx !== -1) {
+    var relUpload = p.slice(uploadIdx + 1);
+    return '/' + relUpload;
+  }
+
+  if (p.indexOf('uploadedImages/') === 0) {
+    return dir + p.replace(/^\/+/, '');
+  }
+
   var base = p.split('/').pop();
-  return '/submit/uploadedImages/' + base;
+  return dir + 'uploadedImages/' + encodeURIComponent(base);
 }
 
 function computeVotes(entry){

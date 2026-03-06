@@ -252,10 +252,32 @@ function entry_username($entry) {
 // Resolve absolute image path from a submission entry
 function entry_abs_image($entry) {
   if (!empty($entry['path'])) {
-    $p = $entry['path'];
+    $p = trim((string)$entry['path']);
+    if ($p === '') return '';
+    $p = str_replace('\\', '/', $p);
+
+    // Legacy absolute web path from old deployment under /submit.
+    if (strpos($p, '/submit/') === 0) {
+      return __DIR__ . '/' . ltrim(substr($p, strlen('/submit/')), '/');
+    }
+
+    if (strpos($p, '/uploadedImages/') === 0) {
+      return __DIR__ . $p;
+    }
+
     if ($p[0] === '/' || preg_match('~^[A-Za-z]:\\\\~', $p)) {
       return $p;
     }
+
+    if (strpos($p, 'uploadedImages/') === 0) {
+      return __DIR__ . '/' . ltrim($p, '/');
+    }
+
+    $uploadPos = strpos($p, '/uploadedImages/');
+    if ($uploadPos !== false) {
+      return UPLOAD_DIR . DIRECTORY_SEPARATOR . basename($p);
+    }
+
     return __DIR__ . '/' . ltrim($p, '/\\');
   }
   if (!empty($entry['file'])) {
@@ -300,11 +322,16 @@ function build_discord_content() {
 
 // Delete the image file associated with a submission entry
 function delete_entry_image($entry) {
-  if (isset($entry['path']) && $entry['path'] !== '') {
-    safe_unlink($entry['path']);
-  } elseif (isset($entry['name']) && $entry['name'] !== '') {
-    $fallback = UPLOAD_DIR . DIRECTORY_SEPARATOR . basename($entry['name']);
-    if (is_file($fallback)) @unlink($fallback);
+  $abs = entry_abs_image($entry);
+  if ($abs !== '') {
+    safe_unlink($abs);
+    return;
+  }
+
+  $filename = entry_image_name($entry);
+  if ($filename !== '') {
+    $fallback = UPLOAD_DIR . DIRECTORY_SEPARATOR . $filename;
+    if (is_file($fallback)) safe_unlink($fallback);
   }
 }
 

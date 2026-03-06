@@ -179,12 +179,8 @@ function forward_via_http_local($absPath,$username){
   curl_close($ch); return true;
 }
 function forward_via_include($absPath,$username){
-  $f=BASE_DIR.'/fwdDiscord.php'; if(!file_exists($f)) return false;
-  include_once $f;
-  if(function_exists('forward_to_discord')){
-    try{ return (bool)forward_to_discord($absPath,$username); }
-    catch(Exception $e){ _dbg('fwd include exception',array('e'=>$e->getMessage())); return false; }
-  }
+  // Disabled: fwdDiscord.php is a standalone endpoint and exits when included.
+  // Keep upload flow stable by skipping include-based forwarding fallback.
   return false;
 }
 function forward_via_webhook($absPath,$username){
