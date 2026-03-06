@@ -1,6 +1,6 @@
 <?php
 header('X-Content-Type-Options: nosniff');
-$build_version = '2026-02-24.01';
+$build_version = '3/5/2026';
 ?><!DOCTYPE html>
 <html lang="en">
 <head>

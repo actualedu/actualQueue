@@ -210,7 +210,7 @@
   <div class="container">
     <h2>Submit Your Screenshot to Office Hours</h2>
 
-    <form action="upload.php" method="post" enctype="multipart/form-data">
+    <form id="uploadForm" action="upload.php" method="post" enctype="multipart/form-data">
       <label for="username">Username:</label>
       <input type="text" name="username" id="username" placeholder="Enter your username" required />
       <!-- Honeypot (bots fill everything) -->
@@ -239,15 +239,51 @@
         <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none" />
       </div>
 
-      <input type="submit" value="Upload" />
+      <input type="submit" id="uploadSubmit" value="Upload" disabled />
     </form>
  <script>
-  fetch('upload.php?action=csrf', { credentials: 'same-origin' })
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      var el = document.getElementById('csrf');
-      if (el && d && d.token) el.value = d.token;
-    });
+  (function () {
+    var csrfEl = document.getElementById('csrf');
+    var formEl = document.getElementById('uploadForm');
+    var submitEl = document.getElementById('uploadSubmit');
+    var csrfReady = false;
+
+    function setSubmitEnabled(enabled) {
+      if (!submitEl) return;
+      submitEl.disabled = !enabled;
+      submitEl.value = enabled ? 'Upload' : 'Preparing...';
+    }
+
+    function loadCsrf() {
+      setSubmitEnabled(false);
+      csrfReady = false;
+      return fetch('upload.php?action=csrf', { credentials: 'same-origin', cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!csrfEl || !d || !d.token) throw new Error('missing csrf token');
+          csrfEl.value = d.token;
+          csrfReady = true;
+          setSubmitEnabled(true);
+        })
+        .catch(function () {
+          if (csrfEl) csrfEl.value = '';
+          csrfReady = false;
+          setSubmitEnabled(false);
+        });
+    }
+
+    if (formEl) {
+      formEl.addEventListener('submit', function (e) {
+        if (csrfReady && csrfEl && csrfEl.value) return;
+        e.preventDefault();
+        loadCsrf().then(function () {
+          if (csrfReady && formEl) formEl.submit();
+        });
+      });
+    }
+
+    loadCsrf();
+  })();
 </script>
 
 
@@ -263,7 +299,7 @@
       <a href="https://www.actualeducation.net/actualmath" class="kudu" target="_blank" rel="noopener noreferrer">Math Bootcamp</a>
 
     </div>
-    <div class="build-version">build 2026-02-18.01</div>
+    <div class="build-version">build 3/5/2026</div>
   </div>
 
   <script>

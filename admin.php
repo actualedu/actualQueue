@@ -30,7 +30,7 @@ define('UPLOAD_DIR', __DIR__ . '/uploadedImages');
 define('SUBMISSIONS_FILE', __DIR__ . '/logs/submissions.json');
 define('SPIN_FILE', __DIR__ . '/logs/spin.json');
 define('ADMIN_LOG', __DIR__ . '/logs/admin_error.log');
-define('BUILD_VERSION', '2026-02-17.01');
+define('BUILD_VERSION', '3/5/2026');
 define('YOUTUBE_API_KEY', getenv('YOUTUBE_API_KEY') ? getenv('YOUTUBE_API_KEY') : '');
 define('YOUTUBE_CHANNEL_ID', getenv('YOUTUBE_CHANNEL_ID') ? getenv('YOUTUBE_CHANNEL_ID') : '');
 

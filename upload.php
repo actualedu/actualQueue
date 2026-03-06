@@ -329,7 +329,20 @@ if (!empty($_POST['website'])) {
 }
 
 // CSRF
-if (empty($_POST['csrf']) || empty($_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $_POST['csrf'])) {
+$csrfPost = isset($_POST['csrf']) ? (string)$_POST['csrf'] : '';
+$csrfSess = isset($_SESSION['csrf']) ? (string)$_SESSION['csrf'] : '';
+if ($csrfPost === '' || $csrfSess === '' || !hash_equals($csrfSess, $csrfPost)) {
+  $csrfReason = 'mismatch';
+  if ($csrfPost === '') $csrfReason = 'missing_post';
+  else if ($csrfSess === '') $csrfReason = 'missing_session';
+  _dbg('csrf rejected', array(
+    'reason'      => $csrfReason,
+    'ip'          => isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '',
+    'ua'          => isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '',
+    'origin'      => isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '',
+    'referer'     => isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : '',
+    'cookie_seen' => isset($_SERVER['HTTP_COOKIE']) ? 1 : 0
+  ));
   http_response_code(403); $msg = 'Invalid security token.'; return render();
 }
 
