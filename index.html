@@ -247,15 +247,16 @@
     var formEl = document.getElementById('uploadForm');
     var submitEl = document.getElementById('uploadSubmit');
     var csrfReady = false;
+    var submitting = false;
 
-    function setSubmitEnabled(enabled) {
+    function setSubmitEnabled(enabled, label) {
       if (!submitEl) return;
       submitEl.disabled = !enabled;
-      submitEl.value = enabled ? 'Upload' : 'Preparing...';
+      submitEl.value = label || (enabled ? 'Upload' : 'Preparing...');
     }
 
     function loadCsrf() {
-      setSubmitEnabled(false);
+      setSubmitEnabled(false, submitting ? 'Uploading...' : 'Preparing...');
       csrfReady = false;
       return fetch('upload.php?action=csrf', { credentials: 'same-origin', cache: 'no-store' })
         .then(function (r) { return r.json(); })
@@ -263,26 +264,47 @@
           if (!csrfEl || !d || !d.token) throw new Error('missing csrf token');
           csrfEl.value = d.token;
           csrfReady = true;
-          setSubmitEnabled(true);
+          if (!submitting) setSubmitEnabled(true, 'Upload');
         })
         .catch(function () {
           if (csrfEl) csrfEl.value = '';
           csrfReady = false;
-          setSubmitEnabled(false);
+          if (!submitting) setSubmitEnabled(false, 'Retry in a moment...');
+          throw new Error('csrf refresh failed');
         });
     }
 
     if (formEl) {
       formEl.addEventListener('submit', function (e) {
-        if (csrfReady && csrfEl && csrfEl.value) return;
         e.preventDefault();
+
+        if (submitting) return;
+
+        submitting = true;
+        setSubmitEnabled(false, 'Securing upload...');
+
         loadCsrf().then(function () {
-          if (csrfReady && formEl) formEl.submit();
+          if (!csrfReady || !csrfEl || !csrfEl.value || !formEl) {
+            throw new Error('csrf not ready');
+          }
+          setSubmitEnabled(false, 'Uploading...');
+          formEl.submit();
+        }).catch(function () {
+          submitting = false;
+          setSubmitEnabled(false, 'Retry in a moment...');
+          window.alert('Could not refresh the upload security token. Please try again.');
         });
       });
     }
 
     loadCsrf();
+
+    window.addEventListener('pageshow', function (e) {
+      if (submitting) return;
+      if (e.persisted || !csrfReady || !csrfEl || !csrfEl.value) {
+        loadCsrf();
+      }
+    });
   })();
 </script>
 
@@ -299,7 +321,7 @@
       <a href="https://www.actualeducation.net/actualmath" class="kudu" target="_blank" rel="noopener noreferrer">Math Bootcamp</a>
 
     </div>
-    <div class="build-version">build 2026-03-05.01</div>
+    <div class="build-version">build 2026-03-23.01</div>
   </div>
 
   <script>
