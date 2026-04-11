@@ -190,7 +190,13 @@ function compute_votes_for_entry($entry, $now) {
   if ($isWinner) return 0;
   $ts = isset($entry['ts']) ? $entry['ts'] : 0;
   $age_min = max(0, ($now - (int)$ts) / 60);
-  $baseVotes = 10 + (int)floor($age_min * 2);
+  if ($age_min <= 45) {
+    $baseVotes = 10 + (int)floor($age_min * 2);
+  } elseif ($age_min <= 90) {
+    $baseVotes = 10 + 90 + (int)floor(($age_min - 45) * 4);
+  } else {
+    $baseVotes = 10 + 90 + 180 + (int)floor(($age_min - 90) * 6);
+  }
   $upvotes = isset($entry['upvotes']) ? (int)$entry['upvotes'] : 0;
   if ($upvotes < 1) return $baseVotes;
   return (int)floor($baseVotes * (1 + log($upvotes + 1)));
@@ -745,7 +751,14 @@ $has_winner = queue_has_winner($subs);
       if (entry && entry.winner) return 0;
       var tsUnix = entry && entry.ts ? entry.ts : 0;
       var ageMin = Math.max(0, (Date.now()/1000 - tsUnix) / 60);
-      var baseVotes = 10 + Math.floor(ageMin * 2);
+      var baseVotes = 10;
+      if (ageMin <= 45) {
+        baseVotes += Math.floor(ageMin * 2);
+      } else if (ageMin <= 90) {
+        baseVotes += 90 + Math.floor((ageMin - 45) * 4);
+      } else {
+        baseVotes += 90 + 180 + Math.floor((ageMin - 90) * 6);
+      }
       var upvotes = entry && entry.upvotes ? parseInt(entry.upvotes, 10) : 0;
       if (!(upvotes > 0)) return baseVotes;
       return Math.floor(baseVotes * (1 + Math.log(upvotes + 1)));
