@@ -229,9 +229,9 @@
         required
       />
 
-      <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Upload image by clicking or dragging">
-        <p><strong>Drag & Drop</strong> your image here, or <u>click</u> to choose a file.</p>
-        <p class="hint" style="font-size:12px; margin-top:6px;">PNG, JPG, GIF, WEBP, HEIC supported</p>
+      <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Upload image by clicking, dragging, or pasting">
+        <p><strong>Drag & Drop</strong> your image here, <u>click</u> to choose a file, or <u>paste</u> from your clipboard.</p>
+        <p class="hint" style="font-size:12px; margin-top:6px;">PNG, JPG, GIF, WEBP, HEIC supported. Press Ctrl+V or Cmd+V after copying an image.</p>
       </div>
 
       <div class="camera-row">
@@ -321,7 +321,7 @@
       <a href="https://www.actualeducation.net/actualmath" class="kudu" target="_blank" rel="noopener noreferrer">Math Bootcamp</a>
 
     </div>
-    <div class="build-version">build 2026-03-23.01</div>
+    <div class="build-version">build 2026-04-13.01</div>
   </div>
 
   <script>
@@ -381,6 +381,23 @@
         setDropZoneMessage(assigned && assigned.name ? assigned.name : 'image');
       }
 
+      function extractImageFiles(items){
+        var files = [];
+        if(!items || !items.length) return files;
+
+        for(var i = 0; i < items.length; i++){
+          var item = items[i];
+          if(!item) continue;
+
+          if (item.kind === 'file' && item.type && item.type.indexOf('image/') === 0 && typeof item.getAsFile === 'function') {
+            var file = item.getAsFile();
+            if (file) files.push(file);
+          }
+        }
+
+        return files;
+      }
+
       dropZone.addEventListener('click', () => hiddenInput.click());
       dropZone.addEventListener('keydown', (e) => {
         if(e.key === 'Enter' || e.key === ' '){
@@ -409,6 +426,31 @@
       dropZone.addEventListener('drop', (e) => {
         const files = e.dataTransfer.files;
         if(files && files.length) assignFiles(files);
+      });
+
+      document.addEventListener('paste', function (e) {
+        var active = document.activeElement;
+        if (active && active.tagName === 'INPUT' && active.type !== 'file') return;
+        if (active && active.tagName === 'TEXTAREA') return;
+
+        var clipboard = e.clipboardData;
+        if (!clipboard) return;
+
+        var imageFiles = extractImageFiles(clipboard.items);
+        if (!imageFiles.length) return;
+
+        e.preventDefault();
+
+        try {
+          if (typeof DataTransfer !== 'undefined') {
+            var dt = new DataTransfer();
+            for (var i = 0; i < imageFiles.length; i++) dt.items.add(imageFiles[i]);
+            assignFiles(dt.files);
+            return;
+          }
+        } catch (_pasteErr) {}
+
+        assignFiles(imageFiles);
       });
 
       if(cameraInput){

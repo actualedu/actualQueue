@@ -2,6 +2,8 @@
 
 This app powers a live office-hours workflow where students submit screenshots, watch their queue status, upvote entries, and admins manage/resolve the queue.
 
+Current build: `2026-04-13.01`
+
 ## Main Pages
 
 - Home (student submit page): `/submit/` (served by `index.html`)
@@ -22,8 +24,9 @@ This app powers a live office-hours workflow where students submit screenshots, 
 
 - Uses a standard form POST with `multipart/form-data`.
 - Fetches CSRF token from `upload.php?action=csrf` before submit.
-- Supports click-to-upload, drag/drop, and camera capture.
+- Supports click-to-upload, drag/drop, clipboard paste, and camera capture.
 - On success/error, `upload.php` returns a confirmation page with queue position.
+- Pasted images are accepted from the clipboard when the page receives `Ctrl+V` / `Cmd+V` and the clipboard contains an image.
 
 ### Validation and Protections in `upload.php`
 
@@ -31,6 +34,7 @@ This app powers a live office-hours workflow where students submit screenshots, 
 - Honeypot field (`website`) blocks simple bots.
 - Queue cap (`MAX_QUEUE`, currently 99).
 - Per-IP submit cooldown (`MIN_SECONDS_BETWEEN`, currently 30s).
+- Per-IP active queue cap (`MAX_ACTIVE_PER_IP`, currently 2 active questions).
 - Max file size 10MB.
 - Allowed MIME types: JPEG, PNG, GIF, WEBP.
 - Image content validation via `getimagesize`.

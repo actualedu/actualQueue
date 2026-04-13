@@ -7,13 +7,14 @@
  *   file/filename/image and path
  * - Discord forwarder best-effort via local fwdDiscord.php (HTTP or include),
  *   optional direct webhook if you define DISCORD_WEBHOOK
- * - Guards: queue cap, per-IP cooldown, CSRF, honeypot, size/MIME/image checks, de-dup
+ * - Guards: queue cap, per-IP cooldown, per-IP active queue cap, CSRF, honeypot, size/MIME/image checks, de-dup
  * - Returns a pretty HTML page (restored) on POST; JSON only for ?action=csrf
  */
 
 /* ===================== CONFIG ===================== */
 define('MAX_QUEUE', 99);
 define('MIN_SECONDS_BETWEEN', 30);
+define('MAX_ACTIVE_PER_IP', 2);
 
 define('BASE_DIR', __DIR__);                         // /.../submit
 define('IMAGE_DIR', BASE_DIR . '/uploadedImages');   // images dir
@@ -155,6 +156,14 @@ function queue_save_all($list){
   return true;
 }
 function queue_count(){ $arr=queue_load_all(); return count($arr); }
+function queue_count_by_ip($ip){
+  $list = queue_load_all();
+  $count = 0;
+  foreach($list as $entry){
+    if(isset($entry['ip']) && (string)$entry['ip'] === (string)$ip) $count++;
+  }
+  return $count;
+}
 function queue_append_item($entry){
   $list=queue_load_all(); if(count($list)>=MAX_QUEUE) return false;
   $list[]=$entry; if(!queue_save_all($list)) return false;
@@ -357,6 +366,14 @@ list($okRL, $retryAfter) = ip_rate_allow($ip, MIN_SECONDS_BETWEEN);
 if (!$okRL) {
   header('Retry-After: ' . (int)$retryAfter);
   http_response_code(429); $msg = 'Please wait '.(int)$retryAfter.' seconds before submitting again.'; return render();
+}
+
+// Per-IP active queue cap
+$activeForIp = queue_count_by_ip($ip);
+if ($activeForIp >= MAX_ACTIVE_PER_IP) {
+  http_response_code(429);
+  $msg = 'You already have '.(int)$activeForIp.' questions in the queue. Please wait until one is resolved before submitting another.';
+  return render();
 }
 
 // Inputs
