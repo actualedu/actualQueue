@@ -81,6 +81,7 @@ Current build: `2026-04-13.01`
   - `baseVotes = 10 + floor(ageMinutes * 2)` for the first 45 minutes
   - after 45 minutes, age accumulation increases to 4 votes/minute
   - after 90 minutes, age accumulation increases to 6 votes/minute
+  - if the same submitter has multiple active entries, only the first active entry keeps full speed; later ones use `SECOND_SUBMISSION_VOTE_SPEED_MULTIPLIER` (currently `0.25`) on the time-growth portion until the earlier entry leaves the queue
   - final votes apply a logarithmic upvote boost: `floor(baseVotes * (1 + log(upvotes + 1)))`
 - Winner entries are excluded from future vote growth/upvotes.
 

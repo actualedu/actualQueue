@@ -30,9 +30,10 @@ define('UPLOAD_DIR', __DIR__ . '/uploadedImages');
 define('SUBMISSIONS_FILE', __DIR__ . '/logs/submissions.json');
 define('SPIN_FILE', __DIR__ . '/logs/spin.json');
 define('ADMIN_LOG', __DIR__ . '/logs/admin_error.log');
-define('BUILD_VERSION', '2026-04-13.01');
+define('BUILD_VERSION', '2026-04-20.01');
 define('YOUTUBE_API_KEY', getenv('YOUTUBE_API_KEY') ? getenv('YOUTUBE_API_KEY') : '');
 define('YOUTUBE_CHANNEL_ID', getenv('YOUTUBE_CHANNEL_ID') ? getenv('YOUTUBE_CHANNEL_ID') : '');
+define('SECOND_SUBMISSION_VOTE_SPEED_MULTIPLIER', 0.25);
 
 @ini_set('display_errors','0');
 @ini_set('log_errors','1');
@@ -190,20 +191,54 @@ function compute_votes_for_entry($entry, $now) {
   if ($isWinner) return 0;
   $ts = isset($entry['ts']) ? $entry['ts'] : 0;
   $age_min = max(0, ($now - (int)$ts) / 60);
+  $growthVotes = 0;
   if ($age_min <= 45) {
-    $baseVotes = 10 + (int)floor($age_min * 2);
+    $growthVotes = (int)floor($age_min * 2);
   } elseif ($age_min <= 90) {
-    $baseVotes = 10 + 90 + (int)floor(($age_min - 45) * 4);
+    $growthVotes = 90 + (int)floor(($age_min - 45) * 4);
   } else {
-    $baseVotes = 10 + 90 + 180 + (int)floor(($age_min - 90) * 6);
+    $growthVotes = 90 + 180 + (int)floor(($age_min - 90) * 6);
   }
+  $speedMultiplier = isset($entry['vote_speed_multiplier']) ? (float)$entry['vote_speed_multiplier'] : 1.0;
+  if ($speedMultiplier < 0) $speedMultiplier = 0;
+  if ($speedMultiplier > 1) $speedMultiplier = 1;
+  $baseVotes = 10 + (int)floor($growthVotes * $speedMultiplier);
   $upvotes = isset($entry['upvotes']) ? (int)$entry['upvotes'] : 0;
   if ($upvotes < 1) return $baseVotes;
   return (int)floor($baseVotes * (1 + log($upvotes + 1)));
 }
 
+function vote_owner_key($entry) {
+  if (!empty($entry['ip'])) return 'ip:' . (string)$entry['ip'];
+  if (!empty($entry['username'])) return 'username:' . strtolower(trim((string)$entry['username']));
+  if (!empty($entry['name'])) return 'name:' . strtolower(trim((string)$entry['name']));
+  if (!empty($entry['user'])) return 'user:' . strtolower(trim((string)$entry['user']));
+  return '';
+}
+
+function apply_vote_speed_multipliers($entries) {
+  $seen = array();
+  $result = array();
+  for ($i = 0; $i < count($entries); $i++) {
+    $entry = $entries[$i];
+    $ownerKey = vote_owner_key($entry);
+    $multiplier = 1.0;
+    if ($ownerKey !== '') {
+      $alreadySeen = isset($seen[$ownerKey]) ? (int)$seen[$ownerKey] : 0;
+      if ($alreadySeen > 0) {
+        $multiplier = (float)SECOND_SUBMISSION_VOTE_SPEED_MULTIPLIER;
+      }
+      $seen[$ownerKey] = $alreadySeen + 1;
+    }
+    $entry['vote_speed_multiplier'] = $multiplier;
+    $result[] = $entry;
+  }
+  return $result;
+}
+
 function lottery_pick($arr) {
   $now = time();
+  $arr = apply_vote_speed_multipliers($arr);
   $votes = array();
   $totalVotes = 0;
   for ($i = 0; $i < count($arr); $i++) {
@@ -603,6 +638,7 @@ elseif ($action === 'choose_winner') {
 
 // Initial values for immediate render; JS will live-update afterward
 $subs = read_submissions();
+$subs = apply_vote_speed_multipliers($subs);
 $count = count($subs);
 $preview = array_slice($subs, 0, 20);
 $has_winner = queue_has_winner($subs);
@@ -751,14 +787,18 @@ $has_winner = queue_has_winner($subs);
       if (entry && entry.winner) return 0;
       var tsUnix = entry && entry.ts ? entry.ts : 0;
       var ageMin = Math.max(0, (Date.now()/1000 - tsUnix) / 60);
-      var baseVotes = 10;
+      var growthVotes = 0;
       if (ageMin <= 45) {
-        baseVotes += Math.floor(ageMin * 2);
+        growthVotes = Math.floor(ageMin * 2);
       } else if (ageMin <= 90) {
-        baseVotes += 90 + Math.floor((ageMin - 45) * 4);
+        growthVotes = 90 + Math.floor((ageMin - 45) * 4);
       } else {
-        baseVotes += 90 + 180 + Math.floor((ageMin - 90) * 6);
+        growthVotes = 90 + 180 + Math.floor((ageMin - 90) * 6);
       }
+      var speedMultiplier = entry && entry.vote_speed_multiplier != null ? parseFloat(entry.vote_speed_multiplier) : 1;
+      if (!(speedMultiplier >= 0)) speedMultiplier = 1;
+      if (speedMultiplier > 1) speedMultiplier = 1;
+      var baseVotes = 10 + Math.floor(growthVotes * speedMultiplier);
       var upvotes = entry && entry.upvotes ? parseInt(entry.upvotes, 10) : 0;
       if (!(upvotes > 0)) return baseVotes;
       return Math.floor(baseVotes * (1 + Math.log(upvotes + 1)));

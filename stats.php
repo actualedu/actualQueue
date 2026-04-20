@@ -241,14 +241,18 @@ function computeVotes(entry){
   if (entry && entry.winner) return 0;
   var tsUnix = entry && entry.ts ? entry.ts : 0;
   var ageMin = Math.max(0, (nowUnix() - tsUnix) / 60);
-  var baseVotes = 10;
+  var growthVotes = 0;
   if (ageMin <= 45) {
-    baseVotes += Math.floor(ageMin * 2);
+    growthVotes = Math.floor(ageMin * 2);
   } else if (ageMin <= 90) {
-    baseVotes += 90 + Math.floor((ageMin - 45) * 4);
+    growthVotes = 90 + Math.floor((ageMin - 45) * 4);
   } else {
-    baseVotes += 90 + 180 + Math.floor((ageMin - 90) * 6);
+    growthVotes = 90 + 180 + Math.floor((ageMin - 90) * 6);
   }
+  var speedMultiplier = entry && entry.vote_speed_multiplier != null ? parseFloat(entry.vote_speed_multiplier) : 1;
+  if (!(speedMultiplier >= 0)) speedMultiplier = 1;
+  if (speedMultiplier > 1) speedMultiplier = 1;
+  var baseVotes = 10 + Math.floor(growthVotes * speedMultiplier);
   var upvotes = entry && entry.upvotes ? parseInt(entry.upvotes, 10) : 0;
   if (!(upvotes > 0)) return baseVotes;
   return Math.floor(baseVotes * (1 + Math.log(upvotes + 1)));
