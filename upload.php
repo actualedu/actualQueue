@@ -35,6 +35,9 @@ define('ERROR_LOG_FILE', LOGS_DIR . '/upload_error.log');
 @mkdir(LOGS_DIR,  0755, true);
 @mkdir(RATE_DIR,  0755, true);
 
+require_once __DIR__ . '/vote_state.php';
+require_once __DIR__ . '/session_bootstrap.php';
+
 /* Optional direct webhook fallback
 // define('DISCORD_WEBHOOK', 'https://discord.com/api/webhooks/XXXX/XXXXX');
 */
@@ -188,6 +191,7 @@ function queue_load_all(){
   $arr=@json_decode($raw,true); return is_array($arr)?$arr:array();
 }
 function queue_save_all($list){
+  $list = prepare_entries_for_voting(is_array($list) ? $list : array(), time());
   $tmp=SUBMISSIONS_JSON.'.tmp';
   $fh=@fopen($tmp,'w');
   if(!$fh){
@@ -219,6 +223,25 @@ function queue_count_by_client_id($clientId){
   $count = 0;
   foreach($list as $entry){
     if(isset($entry['client_id']) && client_key($entry['client_id']) === $key) $count++;
+  }
+  return $count;
+}
+function queue_active_count_by_owner($entry){
+  $ownerKeys = vote_owner_keys($entry);
+  if (count($ownerKeys) === 0) return 0;
+  $ownerMap = array();
+  foreach ($ownerKeys as $ownerKey) $ownerMap[$ownerKey] = true;
+  $list = queue_load_all();
+  $count = 0;
+  foreach ($list as $queued) {
+    if (!empty($queued['winner'])) continue;
+    $queuedKeys = vote_owner_keys($queued);
+    for ($i = 0; $i < count($queuedKeys); $i++) {
+      if (isset($ownerMap[$queuedKeys[$i]])) {
+        $count++;
+        break;
+      }
+    }
   }
   return $count;
 }
@@ -365,7 +388,7 @@ function username_is_banned($rawName, $BAD_WORDS_EXACT, $BAD_WORDS_PARTIAL) {
 
 
 /* ===================== ROUTING ===================== */
-session_start();
+codex_session_start();
 rate_limit_cleanup();
 $clientId = get_or_create_client_id();
 
@@ -540,6 +563,7 @@ $entry = array(
   'client_id' => $clientId,
   'hash'      => $hash
 );
+$entry['vote_base_votes'] = queue_active_count_by_owner($entry) > 0 ? 0 : 10;
 
 // Append to queue
 $res = queue_append_item($entry);

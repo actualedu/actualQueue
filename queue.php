@@ -12,11 +12,14 @@ header('Content-Type: application/json; charset=UTF-8');
 header('Cache-Control: no-store');
 header('X-Server-Time: ' . time());
 
+require_once __DIR__ . '/session_bootstrap.php';
+
 define('SUBMISSIONS_FILE', __DIR__ . '/logs/submissions.json');
 define('SPIN_FILE', __DIR__ . '/logs/spin.json');
 define('UPVOTE_RATE_FILE', __DIR__ . '/logs/upvote_rate.json');
 define('UPVOTE_COOLDOWN_SECONDS', 180);
-define('SECOND_SUBMISSION_VOTE_SPEED_MULTIPLIER', 0.25);
+
+require_once __DIR__ . '/vote_state.php';
 
 function read_json_file($path) {
   $raw = @file_get_contents($path);
@@ -36,40 +39,12 @@ function entry_key($e) {
   return sha1($username . '|' . $ts . '|' . $path . '|' . $name);
 }
 
-function vote_owner_key($entry) {
-  if (!empty($entry['ip'])) return 'ip:' . (string)$entry['ip'];
-  if (!empty($entry['username'])) return 'username:' . strtolower(trim((string)$entry['username']));
-  if (!empty($entry['name'])) return 'name:' . strtolower(trim((string)$entry['name']));
-  if (!empty($entry['user'])) return 'user:' . strtolower(trim((string)$entry['user']));
-  return '';
-}
-
-function apply_vote_speed_multipliers($entries) {
-  $seen = array();
-  $result = array();
-  for ($i = 0; $i < count($entries); $i++) {
-    $entry = $entries[$i];
-    $ownerKey = vote_owner_key($entry);
-    $multiplier = 1.0;
-    if ($ownerKey !== '') {
-      $alreadySeen = isset($seen[$ownerKey]) ? (int)$seen[$ownerKey] : 0;
-      if ($alreadySeen > 0) {
-        $multiplier = (float)SECOND_SUBMISSION_VOTE_SPEED_MULTIPLIER;
-      }
-      $seen[$ownerKey] = $alreadySeen + 1;
-    }
-    $entry['vote_speed_multiplier'] = $multiplier;
-    $result[] = $entry;
-  }
-  return $result;
-}
-
 if (!empty($_GET['spin'])) {
   echo json_encode(read_json_file(SPIN_FILE));
   exit;
 }
 
-$entries = apply_vote_speed_multipliers(read_json_file(SUBMISSIONS_FILE));
+$entries = prepare_entries_for_voting(read_json_file(SUBMISSIONS_FILE), time());
 
 if (!empty($_GET['upvote'])) {
   if (strtoupper($_SERVER['REQUEST_METHOD']) !== 'POST') {
@@ -148,7 +123,7 @@ if (!empty($_GET['upvote'])) {
 }
 
 // Admin gets the full data if they have a valid session
-session_start();
+codex_session_start();
 if (!empty($_GET['full']) && !empty($_SESSION['admin_ok'])) {
   echo json_encode($entries);
   exit;
@@ -165,6 +140,10 @@ foreach ($entries as $e) {
     'winner_ts'=> isset($e['winner_ts']) ? (int)$e['winner_ts'] : 0,
     'upvotes'  => isset($e['upvotes']) ? (int)$e['upvotes'] : 0,
     'last_upvote_ts' => isset($e['last_upvote_ts']) ? (int)$e['last_upvote_ts'] : 0,
+    'vote_base_votes' => isset($e['vote_base_votes']) ? (int)$e['vote_base_votes'] : 10,
+    'vote_growth_accrued' => isset($e['vote_growth_accrued']) ? (float)$e['vote_growth_accrued'] : 0.0,
+    'vote_growth_updated_ts' => isset($e['vote_growth_updated_ts']) ? (int)$e['vote_growth_updated_ts'] : 0,
+    'vote_share_divisor' => isset($e['vote_share_divisor']) ? (int)$e['vote_share_divisor'] : 1,
     'vote_speed_multiplier' => isset($e['vote_speed_multiplier']) ? (float)$e['vote_speed_multiplier'] : 1.0,
     'upvote_cooldown_until' => (
       isset($e['last_upvote_ts']) && (int)$e['last_upvote_ts'] > 0

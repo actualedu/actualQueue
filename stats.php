@@ -1,6 +1,6 @@
 <?php
 header('X-Content-Type-Options: nosniff');
-$build_version = '2026-04-13.01';
+$build_version = '2026-04-22.03';
 ?><!DOCTYPE html>
 <html lang="en">
 <head>
@@ -241,25 +241,49 @@ function toUrl(p){
   return dir + 'uploadedImages/' + encodeURIComponent(base);
 }
 
+function growthVotesAt(tsUnix, atUnix){
+  if (!(tsUnix > 0) || !(atUnix > tsUnix)) return 0;
+  var ageMin = (atUnix - tsUnix) / 60;
+  if (ageMin <= 45) return ageMin * 2;
+  if (ageMin <= 90) return 90 + ((ageMin - 45) * 4);
+  return 270 + ((ageMin - 90) * 6);
+}
+
 function computeVotes(entry){
   if (entry && entry.winner) return 0;
-  var tsUnix = entry && entry.ts ? entry.ts : 0;
-  var ageMin = Math.max(0, (nowUnix() - tsUnix) / 60);
-  var growthVotes = 0;
-  if (ageMin <= 45) {
-    growthVotes = Math.floor(ageMin * 2);
-  } else if (ageMin <= 90) {
-    growthVotes = 90 + Math.floor((ageMin - 45) * 4);
-  } else {
-    growthVotes = 90 + 180 + Math.floor((ageMin - 90) * 6);
+  var now = nowUnix();
+  var tsUnix = entry && entry.ts ? parseInt(entry.ts, 10) : 0;
+  var updatedTs = entry && entry.vote_growth_updated_ts ? parseInt(entry.vote_growth_updated_ts, 10) : tsUnix;
+  if (!(updatedTs >= tsUnix)) updatedTs = tsUnix;
+  if (updatedTs > now) updatedTs = now;
+  var divisor = entry && entry.vote_share_divisor ? parseInt(entry.vote_share_divisor, 10) : 1;
+  if (!(divisor >= 1)) divisor = 1;
+  var accrued = entry && entry.vote_growth_accrued != null ? parseFloat(entry.vote_growth_accrued) : 0;
+  if (!(accrued >= 0)) accrued = 0;
+  if (now > updatedTs) {
+    accrued += (growthVotesAt(tsUnix, now) - growthVotesAt(tsUnix, updatedTs)) / divisor;
   }
-  var speedMultiplier = entry && entry.vote_speed_multiplier != null ? parseFloat(entry.vote_speed_multiplier) : 1;
-  if (!(speedMultiplier >= 0)) speedMultiplier = 1;
-  if (speedMultiplier > 1) speedMultiplier = 1;
-  var baseVotes = 10 + Math.floor(growthVotes * speedMultiplier);
+  var baseStart = entry && entry.vote_base_votes != null ? parseInt(entry.vote_base_votes, 10) : 10;
+  if (!(baseStart >= 0)) baseStart = 10;
+  var baseVotes = baseStart + Math.floor(accrued);
   var upvotes = entry && entry.upvotes ? parseInt(entry.upvotes, 10) : 0;
   if (!(upvotes > 0)) return baseVotes;
   return Math.floor(baseVotes * (1 + Math.log(upvotes + 1)));
+}
+
+function growthRatePerHour(entry){
+  if (entry && entry.winner) return 0;
+  var now = nowUnix();
+  var tsUnix = entry && entry.ts ? parseInt(entry.ts, 10) : 0;
+  if (!(tsUnix > 0) || !(now > tsUnix)) return 0;
+  var ageMin = (now - tsUnix) / 60;
+  var hourly = 0;
+  if (ageMin <= 45) hourly = 120;
+  else if (ageMin <= 90) hourly = 240;
+  else hourly = 360;
+  var divisor = entry && entry.vote_share_divisor ? parseInt(entry.vote_share_divisor, 10) : 1;
+  if (!(divisor >= 1)) divisor = 1;
+  return hourly / divisor;
 }
 
 function formatPostedTime(tsUnix){
@@ -390,6 +414,7 @@ function rankedEntries(rawEntries){
       entryKey: e.entry_key || '',
       upvoteCooldownUntil: e.upvote_cooldown_until ? parseInt(e.upvote_cooldown_until, 10) : 0,
       votes: v,
+      votesPerHour: growthRatePerHour(e),
       odds: voteTotal > 0 ? (v * 100 / voteTotal) : 0
     });
   }
@@ -439,7 +464,7 @@ function renderBoard(rawEntries){
         '<div class="vote-bar" style="width:' + width.toFixed(2) + '%"></div>' +
         '<div class="row-inner">' +
           '<div class="name">' + star + '<a class="name-link" href="' + href + '" target="_blank" rel="noopener noreferrer">' + e.username + '</a>' + postedMeta + '</div>' +
-          '<div class="meta"><span>' + e.votes + ' votes | ' + e.odds.toFixed(1) + '%</span><button class="upvote-btn" data-entry-key="' + e.entryKey + '" data-winner="' + (e.winner ? '1' : '0') + '" data-cooldown-until="' + (e.upvoteCooldownUntil || 0) + '">Upvote</button>' + (e.winner ? '<span class="winner-worked" data-winner-since="' + (e.winnerTs || 0) + '"></span>' : '') + '</div>' +
+          '<div class="meta"><span>' + e.votes + ' votes | ' + e.upvotes + ' supers | ' + e.odds.toFixed(1) + '% | +' + e.votesPerHour.toFixed(0) + '/hr</span><button class="upvote-btn" data-entry-key="' + e.entryKey + '" data-winner="' + (e.winner ? '1' : '0') + '" data-cooldown-until="' + (e.upvoteCooldownUntil || 0) + '">Upvote</button>' + (e.winner ? '<span class="winner-worked" data-winner-since="' + (e.winnerTs || 0) + '"></span>' : '') + '</div>' +
         '</div>' +
       '</div>';
   }

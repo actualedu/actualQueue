@@ -3,11 +3,13 @@
 // Minimal “Creator Connect” one-file app
 // ---------------------------
 
+require_once __DIR__ . '/session_bootstrap.php';
+
 // 1) Storage path (CSV)
 $CSV_PATH = __DIR__ . '/logs/signups.csv';
 
 // 2) Simple rate limit (per IP per 20s)
-session_start();
+codex_session_start();
 $now = time();
 if (!isset($_SESSION['last_submit'])) $_SESSION['last_submit'] = 0;
 
@@ -209,4 +211,3 @@ function h($s){ return htmlspecialchars($s ?? '', ENT_QUOTES, 'UTF-8'); }
   </div>
 </body>
 </html>
-

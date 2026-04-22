@@ -2,7 +2,7 @@
 
 This app powers a live office-hours workflow where students submit screenshots, watch their queue status, upvote entries, and admins manage/resolve the queue.
 
-Current build: `2026-04-13.01`
+Current build: `2026-04-22.03`
 
 ## Main Pages
 
@@ -81,7 +81,9 @@ Current build: `2026-04-13.01`
   - `baseVotes = 10 + floor(ageMinutes * 2)` for the first 45 minutes
   - after 45 minutes, age accumulation increases to 4 votes/minute
   - after 90 minutes, age accumulation increases to 6 votes/minute
-  - if the same submitter has multiple active entries, only the first active entry keeps full speed; later ones use `SECOND_SUBMISSION_VOTE_SPEED_MULTIPLIER` (currently `0.25`) on the time-growth portion until the earlier entry leaves the queue
+  - if the same submitter has multiple active entries, their time-growth is split evenly across those active entries
+  - a newly added second-or-later active entry starts with `0` base votes instead of the normal `10`
+  - each entry stores accrued growth plus the timestamp of its last settlement, so removing one entry does not retroactively boost the survivor's past growth
   - final votes apply a logarithmic upvote boost: `floor(baseVotes * (1 + log(upvotes + 1)))`
 - Winner entries are excluded from future vote growth/upvotes.
 

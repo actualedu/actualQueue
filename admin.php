@@ -9,20 +9,55 @@
 //   • "Delete #N" -> delete an arbitrary queue position (oldest = #1)
 // ===================================================================
 
-session_start();
+require_once __DIR__ . '/session_bootstrap.php';
+
+codex_session_start();
 
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 
-// Load admin key from environment (preferred), with a clear fail-closed behavior
-$__env_key = getenv('CONNECT_QUEUE_ADMIN_KEY');
-if (!$__env_key) { $__env_key = getenv('CONNECT_ADMIN_SECRET'); }
+function env_config($key, $default) {
+  $value = getenv($key);
+  if ($value !== false && $value !== '') return $value;
+  if (isset($_SERVER[$key]) && $_SERVER[$key] !== '') return $_SERVER[$key];
+  if (isset($_ENV[$key]) && $_ENV[$key] !== '') return $_ENV[$key];
 
-if (!$__env_key) {
-  header('HTTP/1.1 500 Internal Server Error');
-  echo 'Admin misconfigured: CONNECT_QUEUE_ADMIN_KEY (or CONNECT_ADMIN_SECRET) not set.';
-  exit;
+  static $envFile = null;
+  if ($envFile === null) {
+    $envFile = array();
+    $paths = array(__DIR__ . '/.env', dirname(__DIR__) . '/.env');
+    for ($i = 0; $i < count($paths); $i++) {
+      $path = $paths[$i];
+      if (!is_file($path) || !is_readable($path)) continue;
+      $lines = @file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+      if (!is_array($lines)) continue;
+      for ($j = 0; $j < count($lines); $j++) {
+        $line = trim($lines[$j]);
+        if ($line === '' || $line[0] === '#') continue;
+        $eqPos = strpos($line, '=');
+        if ($eqPos === false) continue;
+        $name = trim(substr($line, 0, $eqPos));
+        $val = trim(substr($line, $eqPos + 1));
+        if ($name === '') continue;
+        if (strlen($val) >= 2) {
+          $first = $val[0];
+          $last = $val[strlen($val) - 1];
+          if (($first === '"' && $last === '"') || ($first === "'" && $last === "'")) {
+            $val = substr($val, 1, -1);
+          }
+        }
+        $envFile[$name] = $val;
+      }
+    }
+  }
+
+  if (isset($envFile[$key]) && $envFile[$key] !== '') return $envFile[$key];
+  return $default;
 }
+
+// Load admin key from environment (preferred), with a clear fail-closed behavior
+$__env_key = env_config('CONNECT_QUEUE_ADMIN_KEY', '');
+if (!$__env_key) { $__env_key = env_config('CONNECT_ADMIN_SECRET', ''); }
 define('ADMIN_KEY', $__env_key);
 unset($__env_key);
 
@@ -30,10 +65,9 @@ define('UPLOAD_DIR', __DIR__ . '/uploadedImages');
 define('SUBMISSIONS_FILE', __DIR__ . '/logs/submissions.json');
 define('SPIN_FILE', __DIR__ . '/logs/spin.json');
 define('ADMIN_LOG', __DIR__ . '/logs/admin_error.log');
-define('BUILD_VERSION', '2026-04-20.01');
-define('YOUTUBE_API_KEY', getenv('YOUTUBE_API_KEY') ? getenv('YOUTUBE_API_KEY') : '');
-define('YOUTUBE_CHANNEL_ID', getenv('YOUTUBE_CHANNEL_ID') ? getenv('YOUTUBE_CHANNEL_ID') : '');
-define('SECOND_SUBMISSION_VOTE_SPEED_MULTIPLIER', 0.25);
+define('BUILD_VERSION', '2026-04-22.03');
+define('YOUTUBE_API_KEY', env_config('YOUTUBE_API_KEY', ''));
+define('YOUTUBE_CHANNEL_ID', env_config('YOUTUBE_CHANNEL_ID', ''));
 define('SUSPICIOUS_RECENT_WINDOW_SECONDS', 2700);
 
 @ini_set('display_errors','0');
@@ -42,8 +76,9 @@ define('SUSPICIOUS_RECENT_WINDOW_SECONDS', 2700);
 
 // === Discord forum webhook config ===
 require_once __DIR__ . '/forumWebhook.php';
+require_once __DIR__ . '/vote_state.php';
 
-$DISCORD_FORUM_WEBHOOK = getenv('DISCORD_FORUM_WEBHOOK') ? getenv('DISCORD_FORUM_WEBHOOK') : '';
+$DISCORD_FORUM_WEBHOOK = env_config('DISCORD_FORUM_WEBHOOK', '');
 
 define('OFFICE_HOURS_TAG_ID', '1427946399839813632');
 if (!defined('UNSOLVED_TAG_ID')) { define('UNSOLVED_TAG_ID', '1431154094713868368'); }
@@ -161,11 +196,12 @@ function read_submissions() {
   if (!is_file(SUBMISSIONS_FILE)) return array();
   $json = @file_get_contents(SUBMISSIONS_FILE);
   $arr  = json_decode($json, true);
-  return is_array($arr) ? $arr : array();
+  return prepare_entries_for_voting(is_array($arr) ? $arr : array(), time());
 }
 
 function write_submissions($arr) {
-  $result = @file_put_contents(SUBMISSIONS_FILE, json_encode(array_values($arr), JSON_PRETTY_PRINT));
+  $prepared = prepare_entries_for_voting(is_array($arr) ? $arr : array(), time());
+  $result = @file_put_contents(SUBMISSIONS_FILE, json_encode(array_values($prepared), JSON_PRETTY_PRINT));
   if ($result === false) {
     alog('write_submissions FAILED', array(
       'file' => SUBMISSIONS_FILE,
@@ -187,59 +223,9 @@ function write_spin_event($payload) {
   return $result !== false;
 }
 
-function compute_votes_for_entry($entry, $now) {
-  $isWinner = !empty($entry['winner']);
-  if ($isWinner) return 0;
-  $ts = isset($entry['ts']) ? $entry['ts'] : 0;
-  $age_min = max(0, ($now - (int)$ts) / 60);
-  $growthVotes = 0;
-  if ($age_min <= 45) {
-    $growthVotes = (int)floor($age_min * 2);
-  } elseif ($age_min <= 90) {
-    $growthVotes = 90 + (int)floor(($age_min - 45) * 4);
-  } else {
-    $growthVotes = 90 + 180 + (int)floor(($age_min - 90) * 6);
-  }
-  $speedMultiplier = isset($entry['vote_speed_multiplier']) ? (float)$entry['vote_speed_multiplier'] : 1.0;
-  if ($speedMultiplier < 0) $speedMultiplier = 0;
-  if ($speedMultiplier > 1) $speedMultiplier = 1;
-  $baseVotes = 10 + (int)floor($growthVotes * $speedMultiplier);
-  $upvotes = isset($entry['upvotes']) ? (int)$entry['upvotes'] : 0;
-  if ($upvotes < 1) return $baseVotes;
-  return (int)floor($baseVotes * (1 + log($upvotes + 1)));
-}
-
-function vote_owner_key($entry) {
-  if (!empty($entry['ip'])) return 'ip:' . (string)$entry['ip'];
-  if (!empty($entry['username'])) return 'username:' . strtolower(trim((string)$entry['username']));
-  if (!empty($entry['name'])) return 'name:' . strtolower(trim((string)$entry['name']));
-  if (!empty($entry['user'])) return 'user:' . strtolower(trim((string)$entry['user']));
-  return '';
-}
-
-function apply_vote_speed_multipliers($entries) {
-  $seen = array();
-  $result = array();
-  for ($i = 0; $i < count($entries); $i++) {
-    $entry = $entries[$i];
-    $ownerKey = vote_owner_key($entry);
-    $multiplier = 1.0;
-    if ($ownerKey !== '') {
-      $alreadySeen = isset($seen[$ownerKey]) ? (int)$seen[$ownerKey] : 0;
-      if ($alreadySeen > 0) {
-        $multiplier = (float)SECOND_SUBMISSION_VOTE_SPEED_MULTIPLIER;
-      }
-      $seen[$ownerKey] = $alreadySeen + 1;
-    }
-    $entry['vote_speed_multiplier'] = $multiplier;
-    $result[] = $entry;
-  }
-  return $result;
-}
-
 function lottery_pick($arr) {
   $now = time();
-  $arr = apply_vote_speed_multipliers($arr);
+  $arr = prepare_entries_for_voting($arr, $now);
   $votes = array();
   $totalVotes = 0;
   for ($i = 0; $i < count($arr); $i++) {
@@ -432,6 +418,9 @@ function entry_selection_key($entry) {
 }
 
 function render_login($error_msg) {
+  if ($error_msg === '' && ADMIN_KEY === '') {
+    $error_msg = 'Admin key is not configured. Set CONNECT_QUEUE_ADMIN_KEY or CONNECT_ADMIN_SECRET, or add it to a local .env file.';
+  }
   ?>
   <!doctype html>
   <html lang="en">
@@ -473,6 +462,10 @@ function render_login($error_msg) {
 $action = isset($_POST['action']) ? $_POST['action'] : '';
 if ($action === 'login') {
   $k = isset($_POST['key']) ? $_POST['key'] : '';
+  if (ADMIN_KEY === '') {
+    render_login('Admin key is not configured. Set CONNECT_QUEUE_ADMIN_KEY or CONNECT_ADMIN_SECRET, or add it to a local .env file.');
+    exit;
+  }
   if ($k && hash_equals(ADMIN_KEY, $k)) {
     $_SESSION['admin_ok'] = true;
   } else {
@@ -768,7 +761,6 @@ elseif ($action === 'choose_winner') {
 
 // Initial values for immediate render; JS will live-update afterward
 $subs = read_submissions();
-$subs = apply_vote_speed_multipliers($subs);
 $count = count($subs);
 $preview = $subs;
 $has_winner = queue_has_winner($subs);
@@ -886,7 +878,7 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
         <span class="small" id="selectedCount">0 selected</span>
       </div>
     <table>
-      <thead><tr><th class="select-cell"><input class="check-all" id="checkAllRows" type="checkbox" aria-label="Select all rows"></th><th>#</th><th>User</th><th>Flags</th><th>Time</th><th>File</th><th>Thumb</th><th>Votes</th><th>Odds</th></tr></thead>
+      <thead><tr><th class="select-cell"><input class="check-all" id="checkAllRows" type="checkbox" aria-label="Select all rows"></th><th>#</th><th>User</th><th>Flags</th><th>Time</th><th>File</th><th>Thumb</th><th>Votes</th><th>Supers</th><th>Rate</th><th>Odds</th></tr></thead>
       <tbody id="tbody">
         <?php
         $now = time();
@@ -908,6 +900,8 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
             $n = entry_image_name($e);
             $thumb = entry_thumb_url($e);
             $v = isset($previewVotes[$i]) ? (int)$previewVotes[$i] : 0;
+            $upvotes = isset($e['upvotes']) ? (int)$e['upvotes'] : 0;
+            $rate = round(entry_vote_growth_rate_per_hour($e, $now));
             $od = ($previewTotalVotes > 0) ? round(($v * 100) / $previewTotalVotes, 1) : 0;
             $selectKey = entry_selection_key($e);
             $flagHtml = is_suspicious_recent_entry($e, $now)
@@ -928,6 +922,8 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
             }
             echo '</td>';
             echo '<td>'.(int)$v.'</td>';
+            echo '<td>'.(int)$upvotes.'</td>';
+            echo '<td>'.htmlspecialchars('+' . $rate . '/hr').'</td>';
             echo '<td>'.htmlspecialchars($od . '%').'</td>';
             echo '</tr>';
           }
@@ -965,25 +961,49 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
     var checkAllRows = document.getElementById('checkAllRows');
     var nInput = document.querySelector('input[name="n"]');
 
+    function growthVotesAt(tsUnix, atUnix){
+      if (!(tsUnix > 0) || !(atUnix > tsUnix)) return 0;
+      var ageMin = (atUnix - tsUnix) / 60;
+      if (ageMin <= 45) return ageMin * 2;
+      if (ageMin <= 90) return 90 + ((ageMin - 45) * 4);
+      return 270 + ((ageMin - 90) * 6);
+    }
+
     function computeVotes(entry){
       if (entry && entry.winner) return 0;
-      var tsUnix = entry && entry.ts ? entry.ts : 0;
-      var ageMin = Math.max(0, (Date.now()/1000 - tsUnix) / 60);
-      var growthVotes = 0;
-      if (ageMin <= 45) {
-        growthVotes = Math.floor(ageMin * 2);
-      } else if (ageMin <= 90) {
-        growthVotes = 90 + Math.floor((ageMin - 45) * 4);
-      } else {
-        growthVotes = 90 + 180 + Math.floor((ageMin - 90) * 6);
+      var nowUnix = Date.now() / 1000;
+      var tsUnix = entry && entry.ts ? parseInt(entry.ts, 10) : 0;
+      var updatedTs = entry && entry.vote_growth_updated_ts ? parseInt(entry.vote_growth_updated_ts, 10) : tsUnix;
+      if (!(updatedTs >= tsUnix)) updatedTs = tsUnix;
+      if (updatedTs > nowUnix) updatedTs = nowUnix;
+      var divisor = entry && entry.vote_share_divisor ? parseInt(entry.vote_share_divisor, 10) : 1;
+      if (!(divisor >= 1)) divisor = 1;
+      var accrued = entry && entry.vote_growth_accrued != null ? parseFloat(entry.vote_growth_accrued) : 0;
+      if (!(accrued >= 0)) accrued = 0;
+      if (nowUnix > updatedTs) {
+        accrued += (growthVotesAt(tsUnix, nowUnix) - growthVotesAt(tsUnix, updatedTs)) / divisor;
       }
-      var speedMultiplier = entry && entry.vote_speed_multiplier != null ? parseFloat(entry.vote_speed_multiplier) : 1;
-      if (!(speedMultiplier >= 0)) speedMultiplier = 1;
-      if (speedMultiplier > 1) speedMultiplier = 1;
-      var baseVotes = 10 + Math.floor(growthVotes * speedMultiplier);
+      var baseStart = entry && entry.vote_base_votes != null ? parseInt(entry.vote_base_votes, 10) : 10;
+      if (!(baseStart >= 0)) baseStart = 10;
+      var baseVotes = baseStart + Math.floor(accrued);
       var upvotes = entry && entry.upvotes ? parseInt(entry.upvotes, 10) : 0;
       if (!(upvotes > 0)) return baseVotes;
       return Math.floor(baseVotes * (1 + Math.log(upvotes + 1)));
+    }
+
+    function growthRatePerHour(entry){
+      if (entry && entry.winner) return 0;
+      var nowUnix = Date.now() / 1000;
+      var tsUnix = entry && entry.ts ? parseInt(entry.ts, 10) : 0;
+      if (!(tsUnix > 0) || !(nowUnix > tsUnix)) return 0;
+      var ageMin = (nowUnix - tsUnix) / 60;
+      var hourly = 0;
+      if (ageMin <= 45) hourly = 120;
+      else if (ageMin <= 90) hourly = 240;
+      else hourly = 360;
+      var divisor = entry && entry.vote_share_divisor ? parseInt(entry.vote_share_divisor, 10) : 1;
+      if (!(divisor >= 1)) divisor = 1;
+      return hourly / divisor;
     }
 
     function thumbUrl(entry){
@@ -1089,11 +1109,13 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
               '<td class="small">'+name+'</td>'+
               '<td class="thumb-cell">'+(thumb ? '<img class="thumb" src="'+thumb+'" alt="Submission thumbnail" loading="lazy">' : '<span class="small">-</span>')+'</td>'+
               '<td>'+votes+'</td>'+
+              '<td>'+(e.upvotes ? parseInt(e.upvotes, 10) : 0)+'</td>'+
+              '<td>+'+growthRatePerHour(e).toFixed(0)+'/hr</td>'+
               '<td>'+odds+'%</td>'+
               '</tr>';
     }
     if (limit === 0){
-      html = '<tr><td colspan="9" class="small">No submissions.</td></tr>';
+      html = '<tr><td colspan="11" class="small">No submissions.</td></tr>';
     }
     tbody.innerHTML = html;
     syncSelectionUi();
