@@ -64,7 +64,11 @@ $build_version = '2026-04-13.01';
     text-align:right;
   }
 
-  .page{ padding-top:calc(var(--header-h) + 18px); display:flex; justify-content:center; }
+  .page{
+    padding:calc(var(--header-h) + 18px) 0 24px;
+    display:flex;
+    justify-content:center;
+  }
   .wrap{
     width:min(980px, 94vw);
     background:linear-gradient(180deg, rgba(18,26,50,.95), rgba(14,21,43,.95));
@@ -74,7 +78,7 @@ $build_version = '2026-04-13.01';
     box-shadow:0 18px 30px rgba(0,0,0,.35);
   }
   .sub{ color:var(--muted); font-size:14px; margin-bottom:12px; }
-  .board{ display:flex; flex-direction:column; gap:9px; max-height:min(70vh, 640px); overflow:auto; }
+  .board{ display:flex; flex-direction:column; gap:9px; }
   .row{
     border:1px solid rgba(255,255,255,.08);
     border-radius:12px;

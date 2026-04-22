@@ -15,6 +15,9 @@
 define('MAX_QUEUE', 99);
 define('MIN_SECONDS_BETWEEN', 30);
 define('MAX_ACTIVE_PER_IP', 2);
+define('MAX_ACTIVE_PER_CLIENT', 2);
+define('CLIENT_COOKIE_NAME', 'submit_client_id');
+define('CLIENT_COOKIE_TTL', 2592000);
 
 define('BASE_DIR', __DIR__);                         // /.../submit
 define('IMAGE_DIR', BASE_DIR . '/uploadedImages');   // images dir
@@ -69,6 +72,32 @@ function csrf_token_generate() {
 }
 
 function ip_key($ip){ return str_replace(array(':','.'), '-', (string)$ip); }
+function client_key($clientId){ return preg_replace('/[^a-f0-9]/', '', strtolower((string)$clientId)); }
+function set_cookie_compat($name, $value, $expires) {
+  $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+  if (PHP_VERSION_ID >= 70300) {
+    return setcookie($name, $value, array(
+      'expires'  => (int)$expires,
+      'path'     => '/',
+      'secure'   => $secure,
+      'httponly' => true,
+      'samesite' => 'Lax'
+    ));
+  }
+
+  $path = '/; samesite=Lax';
+  return setcookie($name, $value, (int)$expires, $path, '', $secure, true);
+}
+function get_or_create_client_id() {
+  $raw = isset($_COOKIE[CLIENT_COOKIE_NAME]) ? (string)$_COOKIE[CLIENT_COOKIE_NAME] : '';
+  $clientId = client_key($raw);
+  if (strlen($clientId) < 24) {
+    $clientId = bin2hex(random_bytes_56(18));
+  }
+  set_cookie_compat(CLIENT_COOKIE_NAME, $clientId, time() + CLIENT_COOKIE_TTL);
+  $_COOKIE[CLIENT_COOKIE_NAME] = $clientId;
+  return $clientId;
+}
 /** return array(allowed,bool|int retry_after) — fails open if rate_limit dir is unwritable */
 function ip_rate_allow($ip,$cooldown){
   $fn=RATE_DIR.'/'.ip_key($ip).'.txt'; $now=time();
@@ -76,6 +105,25 @@ function ip_rate_allow($ip,$cooldown){
   if(!$fh){
     _dbg('rate_limit: cannot open file (permissions?)', array('file'=>$fn, 'dir_writable'=>is_writable(RATE_DIR)));
     return array(true,0); // fail open — let the user through
+  }
+  if(!flock($fh,LOCK_EX)){ fclose($fh); return array(true,0); }
+  $prev=0; $sz=@filesize($fn); if($sz && $sz>0) $prev=(int)trim(fread($fh,$sz));
+  if($prev && ($now-$prev)<$cooldown){
+    $retry=max(1,$cooldown-($now-$prev)); flock($fh,LOCK_UN); fclose($fh);
+    return array(false,$retry);
+  }
+  ftruncate($fh,0); rewind($fh); fwrite($fh,(string)$now); fflush($fh);
+  flock($fh,LOCK_UN); fclose($fh); return array(true,0);
+}
+/** return array(allowed,bool|int retry_after) — same behavior as ip_rate_allow */
+function client_rate_allow($clientId,$cooldown){
+  $key = client_key($clientId);
+  if ($key === '') return array(true,0);
+  $fn = RATE_DIR.'/.client-'.$key.'.txt'; $now=time();
+  $fh=@fopen($fn,'c+');
+  if(!$fh){
+    _dbg('client_rate_limit: cannot open file (permissions?)', array('file'=>$fn, 'dir_writable'=>is_writable(RATE_DIR)));
+    return array(true,0);
   }
   if(!flock($fh,LOCK_EX)){ fclose($fh); return array(true,0); }
   $prev=0; $sz=@filesize($fn); if($sz && $sz>0) $prev=(int)trim(fread($fh,$sz));
@@ -161,6 +209,16 @@ function queue_count_by_ip($ip){
   $count = 0;
   foreach($list as $entry){
     if(isset($entry['ip']) && (string)$entry['ip'] === (string)$ip) $count++;
+  }
+  return $count;
+}
+function queue_count_by_client_id($clientId){
+  $key = client_key($clientId);
+  if ($key === '') return 0;
+  $list = queue_load_all();
+  $count = 0;
+  foreach($list as $entry){
+    if(isset($entry['client_id']) && client_key($entry['client_id']) === $key) $count++;
   }
   return $count;
 }
@@ -309,6 +367,7 @@ function username_is_banned($rawName, $BAD_WORDS_EXACT, $BAD_WORDS_PARTIAL) {
 /* ===================== ROUTING ===================== */
 session_start();
 rate_limit_cleanup();
+$clientId = get_or_create_client_id();
 
 $method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'GET';
 
@@ -367,12 +426,24 @@ if (!$okRL) {
   header('Retry-After: ' . (int)$retryAfter);
   http_response_code(429); $msg = 'Please wait '.(int)$retryAfter.' seconds before submitting again.'; return render();
 }
+list($okClientRL, $clientRetryAfter) = client_rate_allow($clientId, MIN_SECONDS_BETWEEN);
+if (!$okClientRL) {
+  header('Retry-After: ' . (int)$clientRetryAfter);
+  http_response_code(429); $msg = 'Please wait '.(int)$clientRetryAfter.' seconds before submitting again.'; return render();
+}
 
 // Per-IP active queue cap
 $activeForIp = queue_count_by_ip($ip);
 if ($activeForIp >= MAX_ACTIVE_PER_IP) {
   http_response_code(429);
   $msg = 'You already have '.(int)$activeForIp.' questions in the queue. Please wait until one is resolved before submitting another.';
+  return render();
+}
+// Per-client active queue cap to stop proxy rotation from one browser/device.
+$activeForClient = queue_count_by_client_id($clientId);
+if ($activeForClient >= MAX_ACTIVE_PER_CLIENT) {
+  http_response_code(429);
+  $msg = 'You already have '.(int)$activeForClient.' questions in the queue from this browser. Please wait until one is resolved before submitting another.';
   return render();
 }
 
@@ -466,6 +537,7 @@ $entry = array(
   // extras
   'mime'      => $mime,
   'ip'        => $ip,
+  'client_id' => $clientId,
   'hash'      => $hash
 );
 

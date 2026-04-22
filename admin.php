@@ -34,6 +34,7 @@ define('BUILD_VERSION', '2026-04-20.01');
 define('YOUTUBE_API_KEY', getenv('YOUTUBE_API_KEY') ? getenv('YOUTUBE_API_KEY') : '');
 define('YOUTUBE_CHANNEL_ID', getenv('YOUTUBE_CHANNEL_ID') ? getenv('YOUTUBE_CHANNEL_ID') : '');
 define('SECOND_SUBMISSION_VOTE_SPEED_MULTIPLIER', 0.25);
+define('SUSPICIOUS_RECENT_WINDOW_SECONDS', 2700);
 
 @ini_set('display_errors','0');
 @ini_set('log_errors','1');
@@ -376,6 +377,60 @@ function delete_entry_image($entry) {
   }
 }
 
+function suspicious_username_score($raw) {
+  $name = trim((string)$raw);
+  if ($name === '') return 10;
+
+  $score = 0;
+  $lower = strtolower($name);
+  $compact = preg_replace('/[^a-z0-9]/', '', $lower);
+  $lettersOnly = preg_replace('/[^a-z]/', '', $lower);
+  $len = strlen($compact);
+
+  if ($compact !== '' && preg_match('/^\d+$/', $compact)) $score += 6;
+  if ($len >= 8 && preg_match('/^[a-z0-9]+$/', $compact) && !preg_match('/[aeiou]/', $compact)) $score += 4;
+  if (strlen($name) >= 30 && preg_match('/\s/', $name) && !preg_match('/[aeiou]{2}/', $lower)) $score += 4;
+  if ($lettersOnly !== '' && preg_match('/[asdfjkl;qwertyuiopzxcvbnm]{8,}/', $lettersOnly)) $score += 4;
+  if ($len >= 10) {
+    preg_match_all('/[aeiou]/', $compact, $vowelMatches);
+    $vowelCount = isset($vowelMatches[0]) ? count($vowelMatches[0]) : 0;
+    if ($vowelCount <= 1) $score += 3;
+  }
+  if (preg_match('/(.)\1{3,}/i', $name)) $score += 2;
+
+  return $score;
+}
+
+function is_suspicious_recent_entry($entry, $now) {
+  if (!is_array($entry)) return false;
+  if (!empty($entry['winner'])) return false;
+
+  $ts = isset($entry['ts']) ? (int)$entry['ts'] : 0;
+  if ($ts < 1 || ($now - $ts) > SUSPICIOUS_RECENT_WINDOW_SECONDS) return false;
+
+  $score = suspicious_username_score(entry_username($entry));
+  return $score >= 6;
+}
+
+function count_suspicious_recent_entries($entries, $now) {
+  $count = 0;
+  for ($i = 0; $i < count($entries); $i++) {
+    if (is_suspicious_recent_entry($entries[$i], $now)) $count++;
+  }
+  return $count;
+}
+
+function entry_selection_key($entry) {
+  $parts = array(
+    isset($entry['ts']) ? (string)$entry['ts'] : '',
+    entry_username($entry),
+    entry_image_name($entry),
+    isset($entry['hash']) ? (string)$entry['hash'] : '',
+    isset($entry['ip']) ? (string)$entry['ip'] : ''
+  );
+  return sha1(implode('|', $parts));
+}
+
 function render_login($error_msg) {
   ?>
   <!doctype html>
@@ -573,6 +628,81 @@ elseif ($action === 'delete_n') {
     alog('Admin delete_n', array('n'=>$n, 'entry'=>$entry));
   }
 }
+elseif ($action === 'delete_selected') {
+  $arr = read_submissions();
+  $selected = isset($_POST['selected']) && is_array($_POST['selected']) ? $_POST['selected'] : array();
+  $selectedMap = array();
+  for ($i = 0; $i < count($selected); $i++) {
+    $k = preg_replace('/[^a-f0-9]/', '', strtolower((string)$selected[$i]));
+    if ($k !== '') $selectedMap[$k] = true;
+  }
+
+  if (empty($selectedMap)) {
+    $message = 'No entries selected.';
+    $type = 'warning';
+  } else {
+    $kept = array();
+    $deleted = array();
+    for ($i = 0; $i < count($arr); $i++) {
+      $entry = $arr[$i];
+      $key = entry_selection_key($entry);
+      if (isset($selectedMap[$key])) {
+        delete_entry_image($entry);
+        $deleted[] = entry_username($entry);
+        continue;
+      }
+      $kept[] = $entry;
+    }
+
+    if (count($deleted) === 0) {
+      $message = 'No selected entries matched the current queue.';
+      $type = 'warning';
+    } elseif (!write_submissions($kept)) {
+      $message = 'Matched ' . count($deleted) . ' selected entr' . (count($deleted) === 1 ? 'y' : 'ies') . ', but saving the queue failed.';
+      $type = 'warning';
+    } else {
+      $previewNames = array_slice($deleted, 0, 5);
+      $message = 'Deleted ' . count($deleted) . ' selected entr' . (count($deleted) === 1 ? 'y' : 'ies') . ': ' . implode(', ', $previewNames);
+      if (count($deleted) > count($previewNames)) $message .= ', ...';
+      $message .= '.';
+      $type = 'success';
+    }
+
+    alog('Admin delete_selected', array('selected_count'=>count($selectedMap), 'deleted_count'=>count($deleted), 'deleted_users'=>$deleted));
+  }
+}
+elseif ($action === 'delete_suspicious_recent') {
+  $arr = read_submissions();
+  $now = time();
+  $kept = array();
+  $deleted = array();
+
+  for ($i = 0; $i < count($arr); $i++) {
+    $entry = $arr[$i];
+    if (is_suspicious_recent_entry($entry, $now)) {
+      delete_entry_image($entry);
+      $deleted[] = entry_username($entry);
+      continue;
+    }
+    $kept[] = $entry;
+  }
+
+  if (count($deleted) === 0) {
+    $message = 'No suspicious recent entries matched the cleanup rule.';
+    $type = 'warning';
+  } elseif (!write_submissions($kept)) {
+    $message = 'Matched ' . count($deleted) . ' suspicious recent entries, but saving the queue failed.';
+    $type = 'warning';
+  } else {
+    $previewNames = array_slice($deleted, 0, 5);
+    $message = 'Deleted ' . count($deleted) . ' suspicious recent entr' . (count($deleted) === 1 ? 'y' : 'ies') . ': ' . implode(', ', $previewNames);
+    if (count($deleted) > count($previewNames)) $message .= ', ...';
+    $message .= '.';
+    $type = 'success';
+  }
+
+  alog('Admin delete_suspicious_recent', array('deleted_count'=>count($deleted), 'deleted_users'=>$deleted));
+}
 elseif ($action === 'choose_winner') {
   $arr = read_submissions();
   if (count($arr) === 0) {
@@ -640,8 +770,9 @@ elseif ($action === 'choose_winner') {
 $subs = read_submissions();
 $subs = apply_vote_speed_multipliers($subs);
 $count = count($subs);
-$preview = array_slice($subs, 0, 20);
+$preview = $subs;
 $has_winner = queue_has_winner($subs);
+$suspicious_recent_count = count_suspicious_recent_entries($subs, time());
 ?>
 <!doctype html>
 <html lang="en">
@@ -675,7 +806,18 @@ $has_winner = queue_has_winner($subs);
     background:#0b1020; color:var(--text);
   }
   .build-version{margin-top:10px;text-align:right;color:rgba(164,177,209,.7);font-size:11px;letter-spacing:.2px}
+  .select-cell { width:44px; text-align:center; }
+  .flag-cell { width:140px; }
   .thumb-cell { width:64px; }
+  .table-actions{
+    margin:10px 0 6px;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .table-actions .small{ margin:0; }
+  .queue-table-form{ margin:0; }
   .thumb {
     width:48px;
     height:48px;
@@ -684,6 +826,26 @@ $has_winner = queue_has_winner($subs);
     object-fit:cover;
     background:#0b1020;
     display:block;
+  }
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    border-radius:999px;
+    padding:3px 9px;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.2px;
+    white-space:nowrap;
+  }
+  .badge-warn{
+    background:rgba(245,166,35,.18);
+    color:#ffd27a;
+    border:1px solid rgba(245,166,35,.35);
+  }
+  .row-check, .check-all{
+    width:16px;
+    height:16px;
+    cursor:pointer;
   }
 </style>
 </head>
@@ -707,6 +869,7 @@ $has_winner = queue_has_winner($subs);
     <form method="post" class="row">
       <button name="action" value="mark_done" class="btn btn-ok">Mark Done (oldest)</button>
       <button name="action" value="clear_all" class="btn btn-warn" onclick="return confirm('Delete ALL submissions and images? This cannot be undone.');">Clear All</button>
+      <button id="deleteSuspiciousRecentBtn" name="action" value="delete_suspicious_recent" class="btn btn-warn" onclick="return confirm('Delete recent suspicious-looking entries with junk usernames and no upvotes?');">Delete Suspicious Recent<?php if ($suspicious_recent_count > 0): ?> (<?php echo (int)$suspicious_recent_count; ?>)<?php endif; ?></button>
       <button name="action" value="post_all" class="btn btn-accent" onclick="return confirm('Post ALL items in the queue to the Discord forum (no deletions)?')">Post All</button>
       <span class="small">or</span>
       <input type="number" name="n" min="1" max="<?php echo (int)$count; ?>" placeholder="Queue # (oldest=1)">
@@ -715,9 +878,15 @@ $has_winner = queue_has_winner($subs);
       <button id="chooseWinnerBtn" name="action" value="choose_winner" class="btn btn-accent"<?php echo $has_winner ? ' disabled' : ''; ?>>Choose Winner</button>
     </form>
 
-    <h2 style="margin:14px 0 6px 0; font-size:18px;">Queue Preview (top 20)</h2>
+    <h2 style="margin:14px 0 6px 0; font-size:18px;">Queue Preview</h2>
+    <form method="post" class="queue-table-form" id="queueTableForm">
+      <input type="hidden" name="action" value="delete_selected">
+      <div class="table-actions">
+        <button id="deleteSelectedBtn" type="submit" class="btn btn-warn" disabled onclick="return confirm('Delete the selected entries and their images?');">Delete Selected</button>
+        <span class="small" id="selectedCount">0 selected</span>
+      </div>
     <table>
-      <thead><tr><th>#</th><th>User</th><th>Time</th><th>File</th><th>Thumb</th><th>Votes</th><th>Odds</th></tr></thead>
+      <thead><tr><th class="select-cell"><input class="check-all" id="checkAllRows" type="checkbox" aria-label="Select all rows"></th><th>#</th><th>User</th><th>Flags</th><th>Time</th><th>File</th><th>Thumb</th><th>Votes</th><th>Odds</th></tr></thead>
       <tbody id="tbody">
         <?php
         $now = time();
@@ -729,7 +898,7 @@ $has_winner = queue_has_winner($subs);
           $previewTotalVotes += $votes;
         }
         if (empty($preview)) {
-          echo '<tr><td colspan="7" class="small">No submissions.</td></tr>';
+          echo '<tr><td colspan="9" class="small">No submissions.</td></tr>';
         } else {
           for ($i=0; $i<count($preview); $i++) {
             $e = $preview[$i];
@@ -740,9 +909,15 @@ $has_winner = queue_has_winner($subs);
             $thumb = entry_thumb_url($e);
             $v = isset($previewVotes[$i]) ? (int)$previewVotes[$i] : 0;
             $od = ($previewTotalVotes > 0) ? round(($v * 100) / $previewTotalVotes, 1) : 0;
+            $selectKey = entry_selection_key($e);
+            $flagHtml = is_suspicious_recent_entry($e, $now)
+              ? '<span class="badge badge-warn">Suspicious recent</span>'
+              : '<span class="small">-</span>';
             echo '<tr>';
+            echo '<td class="select-cell"><input class="row-check" type="checkbox" name="selected[]" value="'.htmlspecialchars($selectKey).'"></td>';
             echo '<td>'.($i+1).'</td>';
             echo '<td>'.htmlspecialchars($u).'</td>';
+            echo '<td class="flag-cell">'.$flagHtml.'</td>';
             echo '<td class="small">'.htmlspecialchars($t).'</td>';
             echo '<td class="small">'.htmlspecialchars($n).'</td>';
             echo '<td class="thumb-cell">';
@@ -760,6 +935,7 @@ $has_winner = queue_has_winner($subs);
         ?>
       </tbody>
     </table>
+    </form>
 
     <p class="small" style="margin-top:10px;">This page auto-updates every few seconds by reading <code>logs/submissions.json</code>. Queue position #1 is processed first unless a winner is moved to the top.</p>
     <div class="build-version">build <?php echo htmlspecialchars(BUILD_VERSION); ?></div>
@@ -768,6 +944,8 @@ $has_winner = queue_has_winner($subs);
 <script>
 // --- Live updater: poll logs/submissions.json every 3s and refresh the table/count ---
 (function(){
+  var selectedKeys = {};
+
   function fmt(ts){
     var d = new Date((ts||0)*1000);
     if (!ts) return '-';
@@ -781,6 +959,10 @@ $has_winner = queue_has_winner($subs);
     var updEl   = document.getElementById('updated');
     var tbody   = document.getElementById('tbody');
     var chooseBtn = document.getElementById('chooseWinnerBtn');
+    var deleteSuspiciousBtn = document.getElementById('deleteSuspiciousRecentBtn');
+    var deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+    var selectedCountEl = document.getElementById('selectedCount');
+    var checkAllRows = document.getElementById('checkAllRows');
     var nInput = document.querySelector('input[name="n"]');
 
     function computeVotes(entry){
@@ -817,11 +999,57 @@ $has_winner = queue_has_winner($subs);
       return 'uploadedImages/' + encodeURIComponent(base);
     }
 
+    function suspiciousUsernameScore(raw){
+      var name = ((raw == null ? '' : String(raw))).trim();
+      if (!name) return 10;
+
+      var score = 0;
+      var lower = name.toLowerCase();
+      var compact = lower.replace(/[^a-z0-9]/g, '');
+      var lettersOnly = lower.replace(/[^a-z]/g, '');
+      var len = compact.length;
+
+      if (compact && /^\d+$/.test(compact)) score += 6;
+      if (len >= 8 && /^[a-z0-9]+$/.test(compact) && !/[aeiou]/.test(compact)) score += 4;
+      if (name.length >= 30 && /\s/.test(name) && !/[aeiou]{2}/.test(lower)) score += 4;
+      if (lettersOnly && /[asdfjkl;qwertyuiopzxcvbnm]{8,}/.test(lettersOnly)) score += 4;
+      if (len >= 10) {
+        var vowels = compact.match(/[aeiou]/g);
+        var vowelCount = vowels ? vowels.length : 0;
+        if (vowelCount <= 1) score += 3;
+      }
+      if (/(.)\1{3,}/i.test(name)) score += 2;
+
+      return score;
+    }
+
+    function isSuspiciousRecent(entry, nowSec){
+      if (!entry || entry.winner) return false;
+      var ts = entry.ts ? parseInt(entry.ts, 10) : 0;
+      if (!(ts > 0) || ((nowSec - ts) > <?php echo (int)SUSPICIOUS_RECENT_WINDOW_SECONDS; ?>)) return false;
+      var user = entry.username || entry.user || entry.author || 'Anonymous';
+      return suspiciousUsernameScore(user) >= 6;
+    }
+
+    function entrySelectionKey(entry){
+      var parts = [
+        entry && entry.ts ? String(entry.ts) : '',
+        entry && (entry.username || entry.user || entry.author || 'Anonymous') ? String(entry.username || entry.user || entry.author || 'Anonymous') : '',
+        entry && (entry.path ? String(entry.path).split(/[\\/]/).pop() : (entry.file || entry.filename || entry.image || entry.name || '')) ? String(entry.path ? String(entry.path).split(/[\\/]/).pop() : (entry.file || entry.filename || entry.image || entry.name || '')) : '',
+        entry && entry.hash ? String(entry.hash) : '',
+        entry && entry.ip ? String(entry.ip) : ''
+      ];
+      return sha1(parts.join('|'));
+    }
+
     var totalVotes = 0;
     var hasWinner = false;
+    var suspiciousRecentCount = 0;
+    var nowSec = Math.floor(Date.now() / 1000);
     for (var j=0; j<entries.length; j++){
       totalVotes += computeVotes(entries[j]);
       if (entries[j] && entries[j].winner) hasWinner = true;
+      if (isSuspiciousRecent(entries[j], nowSec)) suspiciousRecentCount++;
     }
 
     countEl.textContent = entries.length.toString();
@@ -830,10 +1058,15 @@ $has_winner = queue_has_winner($subs);
       chooseBtn.disabled = hasWinner;
       chooseBtn.title = hasWinner ? 'A winner is already in queue' : '';
     }
+    if (deleteSuspiciousBtn) {
+      deleteSuspiciousBtn.textContent = 'Delete Suspicious Recent' + (suspiciousRecentCount > 0 ? ' (' + suspiciousRecentCount + ')' : '');
+      deleteSuspiciousBtn.disabled = suspiciousRecentCount === 0;
+      deleteSuspiciousBtn.title = suspiciousRecentCount > 0 ? '' : 'No suspicious recent entries matched the cleanup rule';
+    }
     if (nInput) nInput.max = Math.max(1, entries.length);
 
-    // Build first 20 rows (queue order)
-    var limit = Math.min(entries.length, 20);
+    // Build the full queue in order and let the page scroll naturally.
+    var limit = entries.length;
     var html = '';
     for (var i=0; i<limit; i++){
       var e = entries[i] || {};
@@ -843,9 +1076,15 @@ $has_winner = queue_has_winner($subs);
       var thumb = thumbUrl(e);
       var votes = computeVotes(e);
       var odds = totalVotes > 0 ? ((votes * 100) / totalVotes).toFixed(1) : '0.0';
+      var suspicious = isSuspiciousRecent(e, nowSec);
+      var selectionKey = entrySelectionKey(e);
+      var checkedAttr = selectedKeys[selectionKey] ? ' checked' : '';
+      var flagHtml = suspicious ? '<span class="badge badge-warn">Suspicious recent</span>' : '<span class="small">-</span>';
       html += '<tr>'+
+              '<td class="select-cell"><input class="row-check" type="checkbox" name="selected[]" value="'+selectionKey+'"'+checkedAttr+'></td>'+
               '<td>'+(i+1)+'</td>'+
               '<td>'+star+user+'</td>'+
+              '<td class="flag-cell">'+flagHtml+'</td>'+
               '<td class="small">'+fmt(e.ts)+'</td>'+
               '<td class="small">'+name+'</td>'+
               '<td class="thumb-cell">'+(thumb ? '<img class="thumb" src="'+thumb+'" alt="Submission thumbnail" loading="lazy">' : '<span class="small">-</span>')+'</td>'+
@@ -854,9 +1093,73 @@ $has_winner = queue_has_winner($subs);
               '</tr>';
     }
     if (limit === 0){
-      html = '<tr><td colspan="7" class="small">No submissions.</td></tr>';
+      html = '<tr><td colspan="9" class="small">No submissions.</td></tr>';
     }
     tbody.innerHTML = html;
+    syncSelectionUi();
+  }
+
+  function sha1(msg) {
+    function rotl(n, s) { return (n << s) | (n >>> (32 - s)); }
+    function tohex(i) {
+      var h = '';
+      for (var s = 28; s >= 0; s -= 4) h += ((i >>> s) & 0xf).toString(16);
+      return h;
+    }
+    var bytes = unescape(encodeURIComponent(msg));
+    var words = [];
+    var i;
+    for (i = 0; i < bytes.length; i++) {
+      words[i >> 2] |= bytes.charCodeAt(i) << (24 - (i % 4) * 8);
+    }
+    words[i >> 2] |= 0x80 << (24 - (i % 4) * 8);
+    words[(((i + 8) >> 6) + 1) * 16 - 1] = bytes.length * 8;
+
+    var w = new Array(80);
+    var h0 = 0x67452301, h1 = 0xefcdab89, h2 = 0x98badcfe, h3 = 0x10325476, h4 = 0xc3d2e1f0;
+    for (var b = 0; b < words.length; b += 16) {
+      for (i = 0; i < 16; i++) w[i] = words[b + i] || 0;
+      for (i = 16; i < 80; i++) w[i] = rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+      var a = h0, c = h2, d = h3, e = h4, f, k, temp;
+      var bb = h1;
+      for (i = 0; i < 80; i++) {
+        if (i < 20) { f = (bb & c) | ((~bb) & d); k = 0x5a827999; }
+        else if (i < 40) { f = bb ^ c ^ d; k = 0x6ed9eba1; }
+        else if (i < 60) { f = (bb & c) | (bb & d) | (c & d); k = 0x8f1bbcdc; }
+        else { f = bb ^ c ^ d; k = 0xca62c1d6; }
+        temp = (rotl(a, 5) + f + e + k + (w[i] || 0)) | 0;
+        e = d; d = c; c = rotl(bb, 30); bb = a; a = temp;
+      }
+      h0 = (h0 + a) | 0;
+      h1 = (h1 + bb) | 0;
+      h2 = (h2 + c) | 0;
+      h3 = (h3 + d) | 0;
+      h4 = (h4 + e) | 0;
+    }
+    return tohex(h0) + tohex(h1) + tohex(h2) + tohex(h3) + tohex(h4);
+  }
+
+  function syncSelectionUi(){
+    var deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+    var selectedCountEl = document.getElementById('selectedCount');
+    var checkAllRows = document.getElementById('checkAllRows');
+    var rowChecks = document.querySelectorAll('.row-check');
+    var selectedCount = 0;
+    var visibleCount = rowChecks.length;
+    var allChecked = visibleCount > 0;
+
+    for (var i = 0; i < rowChecks.length; i++) {
+      var box = rowChecks[i];
+      if (box.checked) selectedCount++;
+      else allChecked = false;
+    }
+
+    if (selectedCountEl) selectedCountEl.textContent = selectedCount + ' selected';
+    if (deleteSelectedBtn) deleteSelectedBtn.disabled = selectedCount === 0;
+    if (checkAllRows) {
+      checkAllRows.checked = visibleCount > 0 && allChecked;
+      checkAllRows.indeterminate = selectedCount > 0 && selectedCount < visibleCount;
+    }
   }
 
   var tickBusy = false;
@@ -879,6 +1182,35 @@ $has_winner = queue_has_winner($subs);
         if (timeout) clearTimeout(timeout);
         tickBusy = false;
       });
+  }
+
+  document.addEventListener('change', function(evt){
+    var target = evt.target;
+    if (!target) return;
+
+    if (target.id === 'checkAllRows') {
+      var rowChecks = document.querySelectorAll('.row-check');
+      for (var i = 0; i < rowChecks.length; i++) {
+        rowChecks[i].checked = !!target.checked;
+        if (target.checked) selectedKeys[rowChecks[i].value] = true;
+        else delete selectedKeys[rowChecks[i].value];
+      }
+      syncSelectionUi();
+      return;
+    }
+
+    if (target.classList && target.classList.contains('row-check')) {
+      if (target.checked) selectedKeys[target.value] = true;
+      else delete selectedKeys[target.value];
+      syncSelectionUi();
+    }
+  });
+
+  var queueTableForm = document.getElementById('queueTableForm');
+  if (queueTableForm) {
+    queueTableForm.addEventListener('submit', function(){
+      selectedKeys = {};
+    });
   }
 
   tick();
