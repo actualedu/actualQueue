@@ -65,7 +65,7 @@ define('UPLOAD_DIR', __DIR__ . '/uploadedImages');
 define('SUBMISSIONS_FILE', __DIR__ . '/logs/submissions.json');
 define('SPIN_FILE', __DIR__ . '/logs/spin.json');
 define('ADMIN_LOG', __DIR__ . '/logs/admin_error.log');
-define('BUILD_VERSION', '2026-04-22.03');
+define('BUILD_VERSION', '2026-05-06.01');
 define('YOUTUBE_API_KEY', env_config('YOUTUBE_API_KEY', ''));
 define('YOUTUBE_CHANNEL_ID', env_config('YOUTUBE_CHANNEL_ID', ''));
 define('SUSPICIOUS_RECENT_WINDOW_SECONDS', 2700);

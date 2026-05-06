@@ -2,7 +2,7 @@
 
 This app powers a live office-hours workflow where students submit screenshots, watch their queue status, upvote entries, and admins manage/resolve the queue.
 
-Current build: `2026-04-22.03`
+Current build: `2026-05-06.01`
 
 ## Main Pages
 
