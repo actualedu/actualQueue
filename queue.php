@@ -82,12 +82,25 @@ if (!empty($_GET['upvote'])) {
     exit;
   }
 
-  $rate = read_json_file(UPVOTE_RATE_FILE);
   $now = time();
+  $attempts = isset($entries[$matchIndex]['upvote_attempt_count']) ? (int)$entries[$matchIndex]['upvote_attempt_count'] : 0;
+  $entries[$matchIndex]['upvote_attempt_count'] = $attempts + 1;
+  if (empty($entries[$matchIndex]['first_upvote_attempt_ts'])) {
+    $entries[$matchIndex]['first_upvote_attempt_ts'] = $now;
+    $submittedTs = isset($entries[$matchIndex]['ts']) ? (int)$entries[$matchIndex]['ts'] : 0;
+    if ($submittedTs > 0) {
+      $entries[$matchIndex]['first_upvote_after_submit_seconds'] = max(0, $now - $submittedTs);
+    }
+  }
+  $entries[$matchIndex]['last_upvote_attempt_ts'] = $now;
+  $entries[$matchIndex]['last_upvote_user_agent'] = isset($_SERVER['HTTP_USER_AGENT']) ? substr((string)$_SERVER['HTTP_USER_AGENT'], 0, 255) : '';
+
+  $rate = read_json_file(UPVOTE_RATE_FILE);
   $canonicalKey = entry_key($entries[$matchIndex]);
   $last = isset($rate[$canonicalKey]) ? (int)$rate[$canonicalKey] : 0;
   $elapsed = $now - $last;
   if ($elapsed < UPVOTE_COOLDOWN_SECONDS) {
+    write_json_file(SUBMISSIONS_FILE, array_values($entries));
     $remaining = UPVOTE_COOLDOWN_SECONDS - $elapsed;
     echo json_encode(array(
       'ok' => false,
@@ -139,6 +152,8 @@ foreach ($entries as $e) {
     'winner'   => !empty($e['winner']),
     'winner_ts'=> isset($e['winner_ts']) ? (int)$e['winner_ts'] : 0,
     'upvotes'  => isset($e['upvotes']) ? (int)$e['upvotes'] : 0,
+    'upvote_attempt_count' => isset($e['upvote_attempt_count']) ? (int)$e['upvote_attempt_count'] : 0,
+    'first_upvote_after_submit_seconds' => isset($e['first_upvote_after_submit_seconds']) ? (int)$e['first_upvote_after_submit_seconds'] : 0,
     'last_upvote_ts' => isset($e['last_upvote_ts']) ? (int)$e['last_upvote_ts'] : 0,
     'vote_base_votes' => isset($e['vote_base_votes']) ? (int)$e['vote_base_votes'] : 10,
     'vote_growth_accrued' => isset($e['vote_growth_accrued']) ? (float)$e['vote_growth_accrued'] : 0.0,

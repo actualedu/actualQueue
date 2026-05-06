@@ -69,6 +69,8 @@ define('BUILD_VERSION', '2026-04-22.03');
 define('YOUTUBE_API_KEY', env_config('YOUTUBE_API_KEY', ''));
 define('YOUTUBE_CHANNEL_ID', env_config('YOUTUBE_CHANNEL_ID', ''));
 define('SUSPICIOUS_RECENT_WINDOW_SECONDS', 2700);
+define('SUSPICIOUS_BEHAVIOR_WINDOW_SECONDS', 2700);
+define('SUSPICIOUS_BROWSER_UA', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36');
 
 @ini_set('display_errors','0');
 @ini_set('log_errors','1');
@@ -387,21 +389,94 @@ function suspicious_username_score($raw) {
   return $score;
 }
 
-function is_suspicious_recent_entry($entry, $now) {
+function suspicious_entry_field($entry, $key) {
+  return (is_array($entry) && isset($entry[$key])) ? trim((string)$entry[$key]) : '';
+}
+
+function suspicious_entry_behavior_reasons($entry, $entries, $index, $now) {
+  $reasons = array();
+  if (!is_array($entry) || !empty($entry['winner'])) return $reasons;
+
+  $ts = isset($entry['ts']) ? (int)$entry['ts'] : 0;
+  if ($ts < 1) return $reasons;
+
+  $ua = suspicious_entry_field($entry, 'user_agent');
+  if ($ua === '') $ua = suspicious_entry_field($entry, 'last_upvote_user_agent');
+  $ip = suspicious_entry_field($entry, 'ip');
+  $client = suspicious_entry_field($entry, 'client_id');
+  $attempts = isset($entry['upvote_attempt_count']) ? (int)$entry['upvote_attempt_count'] : 0;
+  $upvotes = isset($entry['upvotes']) ? (int)$entry['upvotes'] : 0;
+  $firstUpvoteDelta = isset($entry['first_upvote_after_submit_seconds']) ? (int)$entry['first_upvote_after_submit_seconds'] : 0;
+
+  if ($ua === SUSPICIOUS_BROWSER_UA) {
+    $reasons[] = 'same suspicious browser signature';
+  }
+  if ($firstUpvoteDelta > 0 && $firstUpvoteDelta <= 15) {
+    $reasons[] = 'upvoted within ' . $firstUpvoteDelta . 's';
+  }
+  if ($attempts >= 8) {
+    $reasons[] = $attempts . ' upvote attempts';
+  } elseif ($upvotes >= 7) {
+    $reasons[] = $upvotes . ' stored upvotes';
+  }
+
+  $clusterCount = 0;
+  $distinctIps = array();
+  $distinctClients = array();
+  if ($ua !== '' && is_array($entries)) {
+    for ($i = 0; $i < count($entries); $i++) {
+      $other = $entries[$i];
+      if (!is_array($other) || !empty($other['winner'])) continue;
+      $otherTs = isset($other['ts']) ? (int)$other['ts'] : 0;
+      if ($otherTs < 1 || abs($otherTs - $ts) > SUSPICIOUS_BEHAVIOR_WINDOW_SECONDS) continue;
+
+      $otherUa = suspicious_entry_field($other, 'user_agent');
+      if ($otherUa === '') $otherUa = suspicious_entry_field($other, 'last_upvote_user_agent');
+      if ($otherUa !== $ua) continue;
+
+      $clusterCount++;
+      $otherIp = suspicious_entry_field($other, 'ip');
+      $otherClient = suspicious_entry_field($other, 'client_id');
+      if ($otherIp !== '') $distinctIps[$otherIp] = true;
+      if ($otherClient !== '') $distinctClients[$otherClient] = true;
+    }
+  }
+
+  if ($clusterCount >= 5 && count($distinctIps) >= 5 && count($distinctClients) >= 5) {
+    $reasons[] = 'same-browser cluster across ' . count($distinctIps) . ' IPs';
+  }
+
+  return $reasons;
+}
+
+function is_suspicious_recent_entry($entry, $now, $entries = null, $index = -1) {
   if (!is_array($entry)) return false;
   if (!empty($entry['winner'])) return false;
 
   $ts = isset($entry['ts']) ? (int)$entry['ts'] : 0;
-  if ($ts < 1 || ($now - $ts) > SUSPICIOUS_RECENT_WINDOW_SECONDS) return false;
+  if ($ts < 1) return false;
 
-  $score = suspicious_username_score(entry_username($entry));
-  return $score >= 6;
+  $behaviorReasons = suspicious_entry_behavior_reasons($entry, $entries, $index, $now);
+  $hasBrowserSignal = false;
+  $hasClusterSignal = false;
+  for ($i = 0; $i < count($behaviorReasons); $i++) {
+    if ($behaviorReasons[$i] === 'same suspicious browser signature') $hasBrowserSignal = true;
+    if (strpos($behaviorReasons[$i], 'same-browser cluster across ') === 0) $hasClusterSignal = true;
+  }
+  if (count($behaviorReasons) >= 2 && ($hasBrowserSignal || $hasClusterSignal)) return true;
+
+  if (($now - $ts) <= SUSPICIOUS_RECENT_WINDOW_SECONDS) {
+    $score = suspicious_username_score(entry_username($entry));
+    if ($score >= 6) return true;
+  }
+
+  return false;
 }
 
 function count_suspicious_recent_entries($entries, $now) {
   $count = 0;
   for ($i = 0; $i < count($entries); $i++) {
-    if (is_suspicious_recent_entry($entries[$i], $now)) $count++;
+    if (is_suspicious_recent_entry($entries[$i], $now, $entries, $i)) $count++;
   }
   return $count;
 }
@@ -672,7 +747,7 @@ elseif ($action === 'delete_suspicious_recent') {
 
   for ($i = 0; $i < count($arr); $i++) {
     $entry = $arr[$i];
-    if (is_suspicious_recent_entry($entry, $now)) {
+    if (is_suspicious_recent_entry($entry, $now, $arr, $i)) {
       delete_entry_image($entry);
       $deleted[] = entry_username($entry);
       continue;
@@ -681,14 +756,14 @@ elseif ($action === 'delete_suspicious_recent') {
   }
 
   if (count($deleted) === 0) {
-    $message = 'No suspicious recent entries matched the cleanup rule.';
+    $message = 'No suspicious entries matched the cleanup rule.';
     $type = 'warning';
   } elseif (!write_submissions($kept)) {
-    $message = 'Matched ' . count($deleted) . ' suspicious recent entries, but saving the queue failed.';
+    $message = 'Matched ' . count($deleted) . ' suspicious entries, but saving the queue failed.';
     $type = 'warning';
   } else {
     $previewNames = array_slice($deleted, 0, 5);
-    $message = 'Deleted ' . count($deleted) . ' suspicious recent entr' . (count($deleted) === 1 ? 'y' : 'ies') . ': ' . implode(', ', $previewNames);
+    $message = 'Deleted ' . count($deleted) . ' suspicious entr' . (count($deleted) === 1 ? 'y' : 'ies') . ': ' . implode(', ', $previewNames);
     if (count($deleted) > count($previewNames)) $message .= ', ...';
     $message .= '.';
     $type = 'success';
@@ -861,7 +936,7 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
     <form method="post" class="row">
       <button name="action" value="mark_done" class="btn btn-ok">Mark Done (oldest)</button>
       <button name="action" value="clear_all" class="btn btn-warn" onclick="return confirm('Delete ALL submissions and images? This cannot be undone.');">Clear All</button>
-      <button id="deleteSuspiciousRecentBtn" name="action" value="delete_suspicious_recent" class="btn btn-warn" onclick="return confirm('Delete recent suspicious-looking entries with junk usernames and no upvotes?');">Delete Suspicious Recent<?php if ($suspicious_recent_count > 0): ?> (<?php echo (int)$suspicious_recent_count; ?>)<?php endif; ?></button>
+      <button id="deleteSuspiciousRecentBtn" name="action" value="delete_suspicious_recent" class="btn btn-warn" onclick="return confirm('Delete entries flagged by suspicious username or submission/upvote behavior?');">Delete Suspicious<?php if ($suspicious_recent_count > 0): ?> (<?php echo (int)$suspicious_recent_count; ?>)<?php endif; ?></button>
       <button name="action" value="post_all" class="btn btn-accent" onclick="return confirm('Post ALL items in the queue to the Discord forum (no deletions)?')">Post All</button>
       <span class="small">or</span>
       <input type="number" name="n" min="1" max="<?php echo (int)$count; ?>" placeholder="Queue # (oldest=1)">
@@ -904,8 +979,10 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
             $rate = round(entry_vote_growth_rate_per_hour($e, $now));
             $od = ($previewTotalVotes > 0) ? round(($v * 100) / $previewTotalVotes, 1) : 0;
             $selectKey = entry_selection_key($e);
-            $flagHtml = is_suspicious_recent_entry($e, $now)
-              ? '<span class="badge badge-warn">Suspicious recent</span>'
+            $flagReasons = suspicious_entry_behavior_reasons($e, $preview, $i, $now);
+            $flagTitle = !empty($flagReasons) ? implode('; ', $flagReasons) : 'Suspicious username';
+            $flagHtml = is_suspicious_recent_entry($e, $now, $preview, $i)
+              ? '<span class="badge badge-warn" title="'.htmlspecialchars($flagTitle).'">Suspicious</span>'
               : '<span class="small">-</span>';
             echo '<tr>';
             echo '<td class="select-cell"><input class="row-check" type="checkbox" name="selected[]" value="'.htmlspecialchars($selectKey).'"></td>';
@@ -1043,12 +1120,71 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
       return score;
     }
 
-    function isSuspiciousRecent(entry, nowSec){
+    var suspiciousBrowserUa = <?php echo json_encode(SUSPICIOUS_BROWSER_UA); ?>;
+    var suspiciousBehaviorWindowSeconds = <?php echo (int)SUSPICIOUS_BEHAVIOR_WINDOW_SECONDS; ?>;
+
+    function entryUa(entry){
+      if (!entry) return '';
+      if (entry.user_agent) return String(entry.user_agent);
+      if (entry.last_upvote_user_agent) return String(entry.last_upvote_user_agent);
+      return '';
+    }
+
+    function suspiciousBehaviorReasons(entry, entries){
+      var reasons = [];
+      if (!entry || entry.winner) return reasons;
+      var ts = entry.ts ? parseInt(entry.ts, 10) : 0;
+      if (!(ts > 0)) return reasons;
+
+      var ua = entryUa(entry);
+      var attempts = entry.upvote_attempt_count ? parseInt(entry.upvote_attempt_count, 10) : 0;
+      var upvotes = entry.upvotes ? parseInt(entry.upvotes, 10) : 0;
+      var firstDelta = entry.first_upvote_after_submit_seconds ? parseInt(entry.first_upvote_after_submit_seconds, 10) : 0;
+
+      if (ua && ua === suspiciousBrowserUa) reasons.push('same suspicious browser signature');
+      if (firstDelta > 0 && firstDelta <= 15) reasons.push('upvoted within ' + firstDelta + 's');
+      if (attempts >= 8) reasons.push(attempts + ' upvote attempts');
+      else if (upvotes >= 7) reasons.push(upvotes + ' stored upvotes');
+
+      var clusterCount = 0;
+      var ips = {};
+      var clients = {};
+      if (ua && entries && entries.length) {
+        for (var i=0; i<entries.length; i++) {
+          var other = entries[i] || {};
+          if (other.winner) continue;
+          var otherTs = other.ts ? parseInt(other.ts, 10) : 0;
+          if (!(otherTs > 0) || Math.abs(otherTs - ts) > suspiciousBehaviorWindowSeconds) continue;
+          if (entryUa(other) !== ua) continue;
+          clusterCount++;
+          if (other.ip) ips[String(other.ip)] = true;
+          if (other.client_id) clients[String(other.client_id)] = true;
+        }
+      }
+
+      if (clusterCount >= 5 && Object.keys(ips).length >= 5 && Object.keys(clients).length >= 5) {
+        reasons.push('same-browser cluster across ' + Object.keys(ips).length + ' IPs');
+      }
+
+      return reasons;
+    }
+
+    function isSuspiciousRecent(entry, nowSec, entries){
       if (!entry || entry.winner) return false;
       var ts = entry.ts ? parseInt(entry.ts, 10) : 0;
-      if (!(ts > 0) || ((nowSec - ts) > <?php echo (int)SUSPICIOUS_RECENT_WINDOW_SECONDS; ?>)) return false;
-      var user = entry.username || entry.user || entry.author || 'Anonymous';
-      return suspiciousUsernameScore(user) >= 6;
+      if (!(ts > 0)) return false;
+      var reasons = suspiciousBehaviorReasons(entry, entries);
+      var hasBrowserSignal = reasons.indexOf('same suspicious browser signature') !== -1;
+      var hasClusterSignal = false;
+      for (var i=0; i<reasons.length; i++) {
+        if (reasons[i].indexOf('same-browser cluster across ') === 0) hasClusterSignal = true;
+      }
+      if (reasons.length >= 2 && (hasBrowserSignal || hasClusterSignal)) return true;
+      if ((nowSec - ts) <= <?php echo (int)SUSPICIOUS_RECENT_WINDOW_SECONDS; ?>) {
+        var user = entry.username || entry.user || entry.author || 'Anonymous';
+        return suspiciousUsernameScore(user) >= 6;
+      }
+      return false;
     }
 
     function entrySelectionKey(entry){
@@ -1069,7 +1205,7 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
     for (var j=0; j<entries.length; j++){
       totalVotes += computeVotes(entries[j]);
       if (entries[j] && entries[j].winner) hasWinner = true;
-      if (isSuspiciousRecent(entries[j], nowSec)) suspiciousRecentCount++;
+      if (isSuspiciousRecent(entries[j], nowSec, entries)) suspiciousRecentCount++;
     }
 
     countEl.textContent = entries.length.toString();
@@ -1079,7 +1215,7 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
       chooseBtn.title = hasWinner ? 'A winner is already in queue' : '';
     }
     if (deleteSuspiciousBtn) {
-      deleteSuspiciousBtn.textContent = 'Delete Suspicious Recent' + (suspiciousRecentCount > 0 ? ' (' + suspiciousRecentCount + ')' : '');
+      deleteSuspiciousBtn.textContent = 'Delete Suspicious' + (suspiciousRecentCount > 0 ? ' (' + suspiciousRecentCount + ')' : '');
       deleteSuspiciousBtn.disabled = suspiciousRecentCount === 0;
       deleteSuspiciousBtn.title = suspiciousRecentCount > 0 ? '' : 'No suspicious recent entries matched the cleanup rule';
     }
@@ -1096,10 +1232,12 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
       var thumb = thumbUrl(e);
       var votes = computeVotes(e);
       var odds = totalVotes > 0 ? ((votes * 100) / totalVotes).toFixed(1) : '0.0';
-      var suspicious = isSuspiciousRecent(e, nowSec);
+      var reasons = suspiciousBehaviorReasons(e, entries);
+      var suspicious = isSuspiciousRecent(e, nowSec, entries);
       var selectionKey = entrySelectionKey(e);
       var checkedAttr = selectedKeys[selectionKey] ? ' checked' : '';
-      var flagHtml = suspicious ? '<span class="badge badge-warn">Suspicious recent</span>' : '<span class="small">-</span>';
+      var flagTitle = reasons.length ? reasons.join('; ').replace(/"/g, '&quot;') : 'Suspicious username';
+      var flagHtml = suspicious ? '<span class="badge badge-warn" title="'+flagTitle+'">Suspicious</span>' : '<span class="small">-</span>';
       html += '<tr>'+
               '<td class="select-cell"><input class="row-check" type="checkbox" name="selected[]" value="'+selectionKey+'"'+checkedAttr+'></td>'+
               '<td>'+(i+1)+'</td>'+

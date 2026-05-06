@@ -561,6 +561,8 @@ $entry = array(
   'mime'      => $mime,
   'ip'        => $ip,
   'client_id' => $clientId,
+  'user_agent'=> isset($_SERVER['HTTP_USER_AGENT']) ? substr((string)$_SERVER['HTTP_USER_AGENT'], 0, 255) : '',
+  'referer'   => isset($_SERVER['HTTP_REFERER']) ? substr((string)$_SERVER['HTTP_REFERER'], 0, 255) : '',
   'hash'      => $hash
 );
 $entry['vote_base_votes'] = queue_active_count_by_owner($entry) > 0 ? 0 : 10;
