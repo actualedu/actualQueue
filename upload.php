@@ -37,6 +37,7 @@ define('ERROR_LOG_FILE', LOGS_DIR . '/upload_error.log');
 
 require_once __DIR__ . '/vote_state.php';
 require_once __DIR__ . '/session_bootstrap.php';
+require_once __DIR__ . '/homework_classifier.php';
 
 /* Optional direct webhook fallback
 // define('DISCORD_WEBHOOK', 'https://discord.com/api/webhooks/XXXX/XXXXX');
@@ -533,6 +534,12 @@ if (!@move_uploaded_file($_FILES['image']['tmp_name'], $dest)) {
 }
 @chmod($dest, 0644);
 
+// Server-side OpenAI classification hook. This runs after the upload has
+// already passed local image validation, and before the entry is appended to
+// the live queue. The result is stored for the admin console; the API key
+// remains server-only in chatGPTKey.
+$homeworkClassification = classifyHomeworkScreenshot($dest, array('mime' => $mime));
+
 // Build entry with LOTS of compatible keys
 $nowUnix = time();
 $timeStr = date('Y-m-d H:i:s', $nowUnix);
@@ -566,6 +573,15 @@ $entry = array(
   'hash'      => $hash
 );
 $entry['vote_base_votes'] = queue_active_count_by_owner($entry) > 0 ? 0 : 10;
+if (isset($homeworkClassification['ok']) && $homeworkClassification['ok'] && isset($homeworkClassification['classification'])) {
+  $entry['homework_classification'] = $homeworkClassification['classification'];
+} else if (isset($homeworkClassification['error']) && is_array($homeworkClassification['error'])) {
+  $entry['homework_classification_error'] = array(
+    'code' => isset($homeworkClassification['error']['code']) ? $homeworkClassification['error']['code'] : 'classification_failed',
+    'message' => isset($homeworkClassification['error']['message']) ? $homeworkClassification['error']['message'] : 'Classification failed.'
+  );
+  _dbg('homework classification failed', $entry['homework_classification_error']);
+}
 
 // Append to queue
 $res = queue_append_item($entry);

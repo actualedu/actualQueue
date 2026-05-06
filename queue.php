@@ -145,6 +145,27 @@ if (!empty($_GET['full']) && !empty($_SESSION['admin_ok'])) {
 // Public gets only safe fields
 $safe = array();
 foreach ($entries as $e) {
+  $classification = (!empty($e['homework_classification']) && is_array($e['homework_classification'])) ? $e['homework_classification'] : array();
+  $publicClassification = array();
+  if (!empty($classification)) {
+    $publicKeys = array(
+      'detected_subject',
+      'topic',
+      'subtopic',
+      'difficulty_1_to_10',
+      'estimated_time_minutes',
+      'estimated_grade_level',
+      'question_type',
+      'confidence',
+      'reason_for_rating'
+    );
+    for ($i = 0; $i < count($publicKeys); $i++) {
+      $key = $publicKeys[$i];
+      if (array_key_exists($key, $classification)) {
+        $publicClassification[$key] = $classification[$key];
+      }
+    }
+  }
   $safe[] = array(
     'username' => isset($e['username']) ? $e['username'] : 'Anonymous',
     'ts'       => isset($e['ts']) ? $e['ts'] : 0,
@@ -160,6 +181,13 @@ foreach ($entries as $e) {
     'vote_growth_updated_ts' => isset($e['vote_growth_updated_ts']) ? (int)$e['vote_growth_updated_ts'] : 0,
     'vote_share_divisor' => isset($e['vote_share_divisor']) ? (int)$e['vote_share_divisor'] : 1,
     'vote_speed_multiplier' => isset($e['vote_speed_multiplier']) ? (float)$e['vote_speed_multiplier'] : 1.0,
+    'classification_subject' => (
+      isset($classification['detected_subject']) && strcasecmp((string)$classification['detected_subject'], 'Mathematics') === 0 && isset($classification['topic']) && (string)$classification['topic'] !== ''
+      ? (string)$classification['topic']
+      : (isset($classification['detected_subject']) ? (string)$classification['detected_subject'] : '')
+    ),
+    'classification_difficulty' => isset($classification['difficulty_1_to_10']) ? (int)$classification['difficulty_1_to_10'] : 0,
+    'homework_classification_public' => $publicClassification,
     'upvote_cooldown_until' => (
       isset($e['last_upvote_ts']) && (int)$e['last_upvote_ts'] > 0
       ? ((int)$e['last_upvote_ts'] + UPVOTE_COOLDOWN_SECONDS)

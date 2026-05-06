@@ -78,7 +78,7 @@ if (!function_exists('entry_vote_growth_rate_per_hour')) {
     $submittedTs = isset($entry['ts']) ? (int)$entry['ts'] : 0;
     $divisor = isset($entry['vote_share_divisor']) ? (int)$entry['vote_share_divisor'] : 1;
     if ($divisor < 1) $divisor = 1;
-    return vote_growth_rate_per_hour($submittedTs, $now) / (float)$divisor;
+    return (vote_growth_rate_per_hour($submittedTs, $now) / (float)$divisor) * entry_classification_priority_multiplier($entry);
   }
 }
 
@@ -106,6 +106,40 @@ if (!function_exists('entry_base_votes')) {
       return (int)$entry['vote_base_votes'];
     }
     return 10;
+  }
+}
+
+if (!function_exists('entry_classification_priority_multiplier')) {
+  function entry_classification_priority_multiplier($entry) {
+    if (!is_array($entry) || empty($entry['homework_classification']) || !is_array($entry['homework_classification'])) {
+      return 1.0;
+    }
+
+    $classification = $entry['homework_classification'];
+    $timeMultiplier = 1.0;
+    $gradeMultiplier = 1.0;
+
+    if (isset($classification['estimated_time_minutes']) && is_numeric($classification['estimated_time_minutes'])) {
+      $minutes = (float)$classification['estimated_time_minutes'];
+      if ($minutes <= 5.0) $timeMultiplier = 1.6;
+      elseif ($minutes < 10.0) $timeMultiplier = 1.3;
+      elseif ($minutes <= 15.0) $timeMultiplier = 1.0;
+      elseif ($minutes <= 25.0) $timeMultiplier = 0.65;
+      else $timeMultiplier = 0.4;
+    }
+
+    if (isset($classification['estimated_grade_level']) && is_numeric($classification['estimated_grade_level'])) {
+      $grade = (int)$classification['estimated_grade_level'];
+      if ($grade < 10) $gradeMultiplier = 1.35;
+      elseif ($grade <= 12) $gradeMultiplier = 1.0;
+      elseif ($grade <= 14) $gradeMultiplier = 0.6;
+      else $gradeMultiplier = 0.45;
+    }
+
+    $multiplier = $timeMultiplier * $gradeMultiplier;
+    if ($multiplier < 0.25) $multiplier = 0.25;
+    if ($multiplier > 2.5) $multiplier = 2.5;
+    return $multiplier;
   }
 }
 
@@ -232,7 +266,8 @@ if (!function_exists('compute_votes_for_entry')) {
 
     $baseVotes = entry_base_votes($entry) + (int)floor($accrued);
     $upvotes = isset($entry['upvotes']) ? (int)$entry['upvotes'] : 0;
-    if ($upvotes < 1) return $baseVotes;
-    return (int)floor($baseVotes * (1 + log($upvotes + 1)));
+    $weightedVotes = $upvotes < 1 ? $baseVotes : (int)floor($baseVotes * (1 + log($upvotes + 1)));
+    $weightedVotes = (int)floor($weightedVotes * entry_classification_priority_multiplier($entry));
+    return max(0, $weightedVotes);
   }
 }

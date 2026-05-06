@@ -340,12 +340,52 @@ function entry_thumb_url($entry) {
   return 'uploadedImages/' . rawurlencode($filename);
 }
 
-// Build Discord content with optional YouTube timestamp
-function build_discord_content() {
+function discord_classification_lines($entry) {
+  if (empty($entry['homework_classification']) || !is_array($entry['homework_classification'])) return array();
+  $classification = $entry['homework_classification'];
+  $fields = array(
+    'detected_subject' => 'Detected Subject',
+    'topic' => 'Topic',
+    'subtopic' => 'Subtopic',
+    'difficulty_1_to_10' => 'Difficulty',
+    'estimated_time_minutes' => 'Estimated Time Minutes',
+    'estimated_grade_level' => 'Estimated Grade Level',
+    'question_type' => 'Question Type',
+    'confidence' => 'Confidence',
+    'reason_for_rating' => 'Reason For Rating'
+  );
+
+  $lines = array();
+  foreach ($fields as $key => $label) {
+    if (!array_key_exists($key, $classification)) continue;
+    $value = $classification[$key];
+    if (is_bool($value)) $value = $value ? 'true' : 'false';
+    else if (is_array($value) || is_object($value)) continue;
+    $value = trim((string)$value);
+    if ($key === 'detected_subject' && strcasecmp($value, 'Mathematics') === 0 && isset($classification['topic'])) {
+      $topicValue = trim((string)$classification['topic']);
+      if ($topicValue !== '') $value = $topicValue;
+    }
+    if ($value === '') continue;
+    if ($key === 'difficulty_1_to_10') $value .= '/10';
+    $lines[] = $label . ': ' . $value;
+  }
+
+  return $lines;
+}
+
+// Build Discord content with optional YouTube timestamp and public classification.
+function build_discord_content($entry = null) {
   $content = "Forwarded from the submissions queue.";
   $yt = youtube_live_timestamp_url(YOUTUBE_API_KEY, YOUTUBE_CHANNEL_ID);
   if (is_string($yt) && $yt !== '') {
     $content .= "\nYouTube (timestamped): " . $yt;
+  }
+  if (is_array($entry)) {
+    $classificationLines = discord_classification_lines($entry);
+    if (!empty($classificationLines)) {
+      $content .= "\n" . implode("\n", $classificationLines);
+    }
   }
   return $content;
 }
@@ -616,7 +656,7 @@ elseif ($action === 'mark_done') {
     $peek = $arr[0];
     $username = entry_username($peek);
     $absImage = entry_abs_image($peek);
-    $content = build_discord_content();
+    $content = build_discord_content($peek);
     alog("Discord post content:\n" . $content);
 
     post_to_discord_forum(
@@ -647,8 +687,9 @@ elseif ($action === 'post_all') {
     $okCount = 0; $failCount = 0;
     for ($i = 0; $i < $total; $i++) {
       $it = $arr[$i];
+      $content = build_discord_content($it);
       $ok = post_to_discord_forum(
-        $DISCORD_FORUM_WEBHOOK, entry_username($it), entry_abs_image($it), $tags
+        $DISCORD_FORUM_WEBHOOK, entry_username($it), entry_abs_image($it), $tags, $content
       );
       if ($ok) $okCount++; else $failCount++;
     }
@@ -664,7 +705,7 @@ elseif ($action === 'post_number') {
 
   if ($num >= 1 && $num <= count($arr)) {
     $it = $arr[$num - 1];
-    $content = build_discord_content();
+    $content = build_discord_content($it);
     $ok = post_to_discord_forum(
       $DISCORD_FORUM_WEBHOOK, entry_username($it), entry_abs_image($it),
       OFFICE_HOURS_TAG_ID, $content
@@ -914,6 +955,43 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
     height:16px;
     cursor:pointer;
   }
+  .modal-backdrop{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,.62);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:18px;
+    z-index:20;
+  }
+  .modal-backdrop.is-open{ display:flex; }
+  .modal{
+    width:min(680px, 94vw);
+    max-height:82vh;
+    overflow:auto;
+    background:#121933;
+    border:1px solid rgba(255,255,255,.12);
+    border-radius:12px;
+    box-shadow:0 18px 50px rgba(0,0,0,.45);
+    padding:18px;
+  }
+  .modal-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:12px;
+  }
+  .modal h2{ margin:0; font-size:18px; }
+  .classification-grid{
+    display:grid;
+    grid-template-columns:minmax(150px, 220px) 1fr;
+    gap:8px 12px;
+    font-size:14px;
+  }
+  .classification-grid dt{ color:var(--muted); margin:0; }
+  .classification-grid dd{ margin:0; overflow-wrap:anywhere; }
 </style>
 </head>
 <body>
@@ -953,7 +1031,7 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
         <span class="small" id="selectedCount">0 selected</span>
       </div>
     <table>
-      <thead><tr><th class="select-cell"><input class="check-all" id="checkAllRows" type="checkbox" aria-label="Select all rows"></th><th>#</th><th>User</th><th>Flags</th><th>Time</th><th>File</th><th>Thumb</th><th>Votes</th><th>Supers</th><th>Rate</th><th>Odds</th></tr></thead>
+      <thead><tr><th class="select-cell"><input class="check-all" id="checkAllRows" type="checkbox" aria-label="Select all rows"></th><th>#</th><th>User</th><th>Flags</th><th>Class</th><th>Time</th><th>File</th><th>Thumb</th><th>Votes</th><th>Supers</th><th>Rate</th><th>Odds</th></tr></thead>
       <tbody id="tbody">
         <?php
         $now = time();
@@ -965,7 +1043,7 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
           $previewTotalVotes += $votes;
         }
         if (empty($preview)) {
-          echo '<tr><td colspan="9" class="small">No submissions.</td></tr>';
+          echo '<tr><td colspan="12" class="small">No submissions.</td></tr>';
         } else {
           for ($i=0; $i<count($preview); $i++) {
             $e = $preview[$i];
@@ -984,11 +1062,22 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
             $flagHtml = is_suspicious_recent_entry($e, $now, $preview, $i)
               ? '<span class="badge badge-warn" title="'.htmlspecialchars($flagTitle).'">Suspicious</span>'
               : '<span class="small">-</span>';
+            $classButton = '<span class="small">Pending</span>';
+            if (!empty($e['homework_classification']) && is_array($e['homework_classification'])) {
+              $displayClassification = $e['homework_classification'];
+              if (isset($displayClassification['extracted_problem_text'])) unset($displayClassification['extracted_problem_text']);
+              $classButton = '<button type="button" class="btn btn-ghost classification-btn" data-classification="'.
+                htmlspecialchars(json_encode($displayClassification), ENT_QUOTES, 'UTF-8').'">View</button>';
+            } elseif (!empty($e['homework_classification_error']) && is_array($e['homework_classification_error'])) {
+              $classButton = '<button type="button" class="btn btn-ghost classification-btn" data-error="'.
+                htmlspecialchars(json_encode($e['homework_classification_error']), ENT_QUOTES, 'UTF-8').'">Error</button>';
+            }
             echo '<tr>';
             echo '<td class="select-cell"><input class="row-check" type="checkbox" name="selected[]" value="'.htmlspecialchars($selectKey).'"></td>';
             echo '<td>'.($i+1).'</td>';
             echo '<td>'.htmlspecialchars($u).'</td>';
             echo '<td class="flag-cell">'.$flagHtml.'</td>';
+            echo '<td>'.$classButton.'</td>';
             echo '<td class="small">'.htmlspecialchars($t).'</td>';
             echo '<td class="small">'.htmlspecialchars($n).'</td>';
             echo '<td class="thumb-cell">';
@@ -1012,6 +1101,16 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
 
     <p class="small" style="margin-top:10px;">This page auto-updates every few seconds by reading <code>logs/submissions.json</code>. Queue position #1 is processed first unless a winner is moved to the top.</p>
     <div class="build-version">build <?php echo htmlspecialchars(BUILD_VERSION); ?></div>
+  </div>
+
+  <div class="modal-backdrop" id="classificationModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="classificationModalTitle">
+      <div class="modal-head">
+        <h2 id="classificationModalTitle">Homework Classification</h2>
+        <button type="button" class="btn btn-ghost" id="classificationModalClose">Close</button>
+      </div>
+      <div id="classificationModalBody" class="small"></div>
+    </div>
   </div>
 
 <script>
@@ -1064,8 +1163,8 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
       if (!(baseStart >= 0)) baseStart = 10;
       var baseVotes = baseStart + Math.floor(accrued);
       var upvotes = entry && entry.upvotes ? parseInt(entry.upvotes, 10) : 0;
-      if (!(upvotes > 0)) return baseVotes;
-      return Math.floor(baseVotes * (1 + Math.log(upvotes + 1)));
+      var weightedVotes = !(upvotes > 0) ? baseVotes : Math.floor(baseVotes * (1 + Math.log(upvotes + 1)));
+      return Math.max(0, Math.floor(weightedVotes * classificationPriorityMultiplier(entry)));
     }
 
     function growthRatePerHour(entry){
@@ -1080,7 +1179,36 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
       else hourly = 360;
       var divisor = entry && entry.vote_share_divisor ? parseInt(entry.vote_share_divisor, 10) : 1;
       if (!(divisor >= 1)) divisor = 1;
-      return hourly / divisor;
+      return (hourly / divisor) * classificationPriorityMultiplier(entry);
+    }
+
+    function classificationPriorityMultiplier(entry){
+      var classification = entry && (entry.homework_classification || entry.homework_classification_public);
+      if (!classification || typeof classification !== 'object') return 1;
+
+      var timeMultiplier = 1;
+      var gradeMultiplier = 1;
+      var minutes = classification.estimated_time_minutes != null ? parseFloat(classification.estimated_time_minutes) : NaN;
+      if (!isNaN(minutes)) {
+        if (minutes <= 5) timeMultiplier = 1.6;
+        else if (minutes < 10) timeMultiplier = 1.3;
+        else if (minutes <= 15) timeMultiplier = 1;
+        else if (minutes <= 25) timeMultiplier = 0.65;
+        else timeMultiplier = 0.4;
+      }
+
+      var grade = classification.estimated_grade_level != null ? parseInt(classification.estimated_grade_level, 10) : NaN;
+      if (!isNaN(grade)) {
+        if (grade < 10) gradeMultiplier = 1.35;
+        else if (grade <= 12) gradeMultiplier = 1;
+        else if (grade <= 14) gradeMultiplier = 0.6;
+        else gradeMultiplier = 0.45;
+      }
+
+      var multiplier = timeMultiplier * gradeMultiplier;
+      if (multiplier < 0.25) multiplier = 0.25;
+      if (multiplier > 2.5) multiplier = 2.5;
+      return multiplier;
     }
 
     function thumbUrl(entry){
@@ -1094,6 +1222,40 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
       var base = raw.split(/[\\/]/).pop();
       if (!base) return '';
       return 'uploadedImages/' + encodeURIComponent(base);
+    }
+
+    function htmlEscape(value){
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function classificationForDisplay(entry){
+      if (!entry || !entry.homework_classification) return null;
+      var source = entry.homework_classification;
+      var out = {};
+      for (var key in source) {
+        if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+        if (key === 'extracted_problem_text') continue;
+        out[key] = source[key];
+      }
+      return out;
+    }
+
+    function classificationButton(entry){
+      var classification = classificationForDisplay(entry);
+      if (classification) {
+        return '<button type="button" class="btn btn-ghost classification-btn" data-classification="' +
+          htmlEscape(JSON.stringify(classification)) + '">View</button>';
+      }
+      if (entry && entry.homework_classification_error) {
+        return '<button type="button" class="btn btn-ghost classification-btn" data-error="' +
+          htmlEscape(JSON.stringify(entry.homework_classification_error)) + '">Error</button>';
+      }
+      return '<span class="small">Pending</span>';
     }
 
     function suspiciousUsernameScore(raw){
@@ -1243,6 +1405,7 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
               '<td>'+(i+1)+'</td>'+
               '<td>'+star+user+'</td>'+
               '<td class="flag-cell">'+flagHtml+'</td>'+
+              '<td>'+classificationButton(e)+'</td>'+
               '<td class="small">'+fmt(e.ts)+'</td>'+
               '<td class="small">'+name+'</td>'+
               '<td class="thumb-cell">'+(thumb ? '<img class="thumb" src="'+thumb+'" alt="Submission thumbnail" loading="lazy">' : '<span class="small">-</span>')+'</td>'+
@@ -1253,7 +1416,7 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
               '</tr>';
     }
     if (limit === 0){
-      html = '<tr><td colspan="11" class="small">No submissions.</td></tr>';
+      html = '<tr><td colspan="12" class="small">No submissions.</td></tr>';
     }
     tbody.innerHTML = html;
     syncSelectionUi();
@@ -1372,6 +1535,90 @@ $suspicious_recent_count = count_suspicious_recent_entries($subs, time());
       selectedKeys = {};
     });
   }
+
+  function modalEscape(value){
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function classificationLabel(key){
+    return String(key).replace(/_/g, ' ').replace(/\b\w/g, function(ch){ return ch.toUpperCase(); });
+  }
+
+  function openClassificationModal(payload, isError){
+    var modal = document.getElementById('classificationModal');
+    var body = document.getElementById('classificationModalBody');
+    if (!modal || !body) return;
+
+    if (!payload || typeof payload !== 'object') {
+      body.innerHTML = '<p>Classification data is unavailable.</p>';
+    } else if (isError) {
+      body.innerHTML = '<dl class="classification-grid">' +
+        '<dt>Code</dt><dd>' + modalEscape(payload.code || 'classification_failed') + '</dd>' +
+        '<dt>Message</dt><dd>' + modalEscape(payload.message || 'Classification failed.') + '</dd>' +
+        '</dl>';
+    } else {
+      if (Object.prototype.hasOwnProperty.call(payload, 'extracted_problem_text')) {
+        delete payload.extracted_problem_text;
+      }
+      var keys = [
+        'detected_subject',
+        'topic',
+        'subtopic',
+        'difficulty_1_to_10',
+        'estimated_time_minutes',
+        'estimated_grade_level',
+        'question_type',
+        'confidence',
+        'needs_human_review',
+        'reason_for_rating'
+      ];
+      var html = '<dl class="classification-grid">';
+      for (var i = 0; i < keys.length; i++) {
+        var key = keys[i];
+        if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
+        html += '<dt>' + modalEscape(classificationLabel(key)) + '</dt><dd>' + modalEscape(payload[key]) + '</dd>';
+      }
+      html += '</dl>';
+      body.innerHTML = html;
+    }
+
+    modal.classList.add('is-open');
+    modal.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeClassificationModal(){
+    var modal = document.getElementById('classificationModal');
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  document.addEventListener('click', function(evt){
+    var target = evt.target;
+    if (!target) return;
+
+    if (target.id === 'classificationModalClose' || target.id === 'classificationModal') {
+      closeClassificationModal();
+      return;
+    }
+
+    if (target.classList && target.classList.contains('classification-btn')) {
+      var raw = target.getAttribute('data-classification') || target.getAttribute('data-error') || '';
+      var isError = !!target.getAttribute('data-error');
+      var payload = null;
+      try { payload = raw ? JSON.parse(raw) : null; } catch (_e) { payload = null; }
+      openClassificationModal(payload, isError);
+    }
+  });
+
+  document.addEventListener('keydown', function(evt){
+    if (evt.key === 'Escape') closeClassificationModal();
+  });
 
   tick();
   setInterval(tick, 3000);

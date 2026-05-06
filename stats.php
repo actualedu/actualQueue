@@ -97,7 +97,8 @@ $build_version = '2026-05-06.01';
   .name .star{ color:var(--gold); text-shadow:0 0 10px rgba(249,199,79,.5); }
   .posted-wrap{ display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .posted{ color:var(--muted); font-size:12px; font-weight:500; }
-  .queue-minutes{
+  .queue-minutes,
+  .classification-pill{
     color:#062133;
     background:linear-gradient(180deg, rgba(99,215,255,.95), rgba(99,215,255,.78));
     border:1px solid rgba(99,215,255,.55);
@@ -108,6 +109,15 @@ $build_version = '2026-05-06.01';
     letter-spacing:.1px;
     box-shadow:0 0 0 1px rgba(4,12,28,.24) inset;
     white-space:nowrap;
+  }
+  .classification-pill{
+    color:#2c1b00;
+    background:linear-gradient(180deg, rgba(249,199,79,.96), rgba(249,199,79,.8));
+    border-color:rgba(249,199,79,.55);
+  }
+  .difficulty-pill{
+    color:#04140b;
+    border-color:rgba(255,255,255,.24);
   }
   .meta{ color:var(--muted); font-size:13px; white-space:nowrap; display:flex; align-items:center; gap:10px; }
   .empty{ color:var(--muted); padding:16px 10px; }
@@ -123,7 +133,58 @@ $build_version = '2026-05-06.01';
     cursor:pointer;
   }
   .upvote-btn[disabled]{ opacity:.55; cursor:not-allowed; }
+  .classify-btn{
+    border:1px solid rgba(249,199,79,.42);
+    color:#fff3c4;
+    background:rgba(249,199,79,.12);
+    border-radius:8px;
+    padding:5px 10px;
+    font-size:12px;
+    font-weight:700;
+    cursor:pointer;
+  }
+  .classify-btn[disabled]{ opacity:.5; cursor:not-allowed; }
   .winner-worked{ color:var(--gold); font-size:12px; font-weight:700; white-space:nowrap; }
+  .classification-pop{
+    position:fixed;
+    left:50%;
+    bottom:20px;
+    transform:translateX(-50%);
+    display:none;
+    z-index:30;
+    width:min(360px, 92vw);
+    background:#121a32;
+    border:1px solid rgba(255,255,255,.14);
+    border-radius:12px;
+    box-shadow:0 14px 34px rgba(0,0,0,.38);
+    padding:12px 14px;
+  }
+  .classification-pop.is-open{ display:block; }
+  .classification-pop-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:8px;
+    font-weight:800;
+  }
+  .classification-pop-close{
+    border:0;
+    background:transparent;
+    color:var(--muted);
+    cursor:pointer;
+    font-size:18px;
+    line-height:1;
+  }
+  .classification-grid{
+    display:grid;
+    grid-template-columns:minmax(130px, 180px) 1fr;
+    gap:7px 12px;
+    color:var(--muted);
+    font-size:13px;
+  }
+  .classification-grid dt{ margin:0; }
+  .classification-grid dd{ margin:0; color:var(--text); overflow-wrap:anywhere; }
   .footer-meta{
     margin-top:12px;
     display:flex;
@@ -206,6 +267,14 @@ $build_version = '2026-05-06.01';
     </div>
   </div>
 
+  <div class="classification-pop" id="classificationPop" aria-live="polite">
+    <div class="classification-pop-head">
+      <span>Classification</span>
+      <button class="classification-pop-close" id="classificationPopClose" type="button" aria-label="Close classification">&times;</button>
+    </div>
+    <div id="classificationBody" class="classification-grid"></div>
+  </div>
+
 <script>
 function toUrl(p){
   if(!p) return '#';
@@ -267,8 +336,8 @@ function computeVotes(entry){
   if (!(baseStart >= 0)) baseStart = 10;
   var baseVotes = baseStart + Math.floor(accrued);
   var upvotes = entry && entry.upvotes ? parseInt(entry.upvotes, 10) : 0;
-  if (!(upvotes > 0)) return baseVotes;
-  return Math.floor(baseVotes * (1 + Math.log(upvotes + 1)));
+  var weightedVotes = !(upvotes > 0) ? baseVotes : Math.floor(baseVotes * (1 + Math.log(upvotes + 1)));
+  return Math.max(0, Math.floor(weightedVotes * classificationPriorityMultiplier(entry)));
 }
 
 function growthRatePerHour(entry){
@@ -283,7 +352,36 @@ function growthRatePerHour(entry){
   else hourly = 360;
   var divisor = entry && entry.vote_share_divisor ? parseInt(entry.vote_share_divisor, 10) : 1;
   if (!(divisor >= 1)) divisor = 1;
-  return hourly / divisor;
+  return (hourly / divisor) * classificationPriorityMultiplier(entry);
+}
+
+function classificationPriorityMultiplier(entry){
+  var classification = entry && (entry.homework_classification || entry.homework_classification_public);
+  if (!classification || typeof classification !== 'object') return 1;
+
+  var timeMultiplier = 1;
+  var gradeMultiplier = 1;
+  var minutes = classification.estimated_time_minutes != null ? parseFloat(classification.estimated_time_minutes) : NaN;
+  if (!isNaN(minutes)) {
+    if (minutes <= 5) timeMultiplier = 1.6;
+    else if (minutes < 10) timeMultiplier = 1.3;
+    else if (minutes <= 15) timeMultiplier = 1;
+    else if (minutes <= 25) timeMultiplier = 0.65;
+    else timeMultiplier = 0.4;
+  }
+
+  var grade = classification.estimated_grade_level != null ? parseInt(classification.estimated_grade_level, 10) : NaN;
+  if (!isNaN(grade)) {
+    if (grade < 10) gradeMultiplier = 1.35;
+    else if (grade <= 12) gradeMultiplier = 1;
+    else if (grade <= 14) gradeMultiplier = 0.6;
+    else gradeMultiplier = 0.45;
+  }
+
+  var multiplier = timeMultiplier * gradeMultiplier;
+  if (multiplier < 0.25) multiplier = 0.25;
+  if (multiplier > 2.5) multiplier = 2.5;
+  return multiplier;
 }
 
 function formatPostedTime(tsUnix){
@@ -298,6 +396,31 @@ function formatQueueMinutes(tsUnix){
 }
 
 function safeText(v){ return (v == null ? '' : String(v)).replace(/[<>]/g,''); }
+
+function safeAttr(v){
+  return safeText(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function aboutClassificationForDisplay(raw){
+  if (!raw || typeof raw !== 'object') return null;
+  var out = {};
+  var keys = [
+    'detected_subject',
+    'topic',
+    'subtopic',
+    'difficulty_1_to_10',
+    'estimated_time_minutes',
+    'estimated_grade_level',
+    'question_type',
+    'confidence',
+    'reason_for_rating'
+  ];
+  for (var i=0; i<keys.length; i++) {
+    var key = keys[i];
+    if (Object.prototype.hasOwnProperty.call(raw, key)) out[key] = raw[key];
+  }
+  return Object.keys(out).length ? out : null;
+}
 
 var lastSpinTs = 0;
 var spinReady = false;
@@ -413,6 +536,9 @@ function rankedEntries(rawEntries){
       upvotes: e.upvotes ? parseInt(e.upvotes, 10) : 0,
       entryKey: e.entry_key || '',
       upvoteCooldownUntil: e.upvote_cooldown_until ? parseInt(e.upvote_cooldown_until, 10) : 0,
+      classificationSubject: safeText(e.classification_subject || ''),
+      classificationDifficulty: e.classification_difficulty ? parseInt(e.classification_difficulty, 10) : 0,
+      classificationAbout: aboutClassificationForDisplay(e.homework_classification_public),
       votes: v,
       votesPerHour: growthRatePerHour(e),
       odds: voteTotal > 0 ? (v * 100 / voteTotal) : 0
@@ -453,18 +579,32 @@ function renderBoard(rawEntries){
     var posted = formatPostedTime(e.ts);
     var queueMins = formatQueueMinutes(e.ts);
     var postedMeta = '';
+    var classButton = '';
+    var subjectPill = e.classificationSubject ? '<span class="classification-pill">' + safeText(e.classificationSubject) + '</span>' : '';
+    var difficultyPill = '';
+    if (e.classificationDifficulty) {
+      var difficultyHue = Math.max(0, Math.min(120, 120 - ((e.classificationDifficulty - 1) * (120 / 9))));
+      difficultyPill = '<span class="classification-pill difficulty-pill" style="background:linear-gradient(180deg, hsl(' + difficultyHue.toFixed(0) + ', 78%, 62%), hsl(' + difficultyHue.toFixed(0) + ', 72%, 49%));">Difficulty ' + e.classificationDifficulty + '/10</span>';
+    }
     if (posted || queueMins) {
       postedMeta = '<span class="posted-wrap">' +
         (posted ? '<span class="posted">Submitted ' + posted + '</span>' : '') +
         (queueMins ? '<span class="queue-minutes">' + queueMins + '</span>' : '') +
+        subjectPill +
+        difficultyPill +
       '</span>';
+    }
+    if (e.classificationAbout) {
+      classButton = '<button class="classify-btn" type="button" data-about="' + safeAttr(JSON.stringify(e.classificationAbout)) + '">About</button>';
+    } else {
+      classButton = '<button class="classify-btn" type="button" disabled>About</button>';
     }
     html += '' +
       '<div class="row">' +
         '<div class="vote-bar" style="width:' + width.toFixed(2) + '%"></div>' +
         '<div class="row-inner">' +
           '<div class="name">' + star + '<a class="name-link" href="' + href + '" target="_blank" rel="noopener noreferrer">' + e.username + '</a>' + postedMeta + '</div>' +
-          '<div class="meta"><span>' + e.votes + ' votes | ' + e.upvotes + ' supers | ' + e.odds.toFixed(1) + '% | +' + e.votesPerHour.toFixed(0) + '/hr</span><button class="upvote-btn" data-entry-key="' + e.entryKey + '" data-winner="' + (e.winner ? '1' : '0') + '" data-cooldown-until="' + (e.upvoteCooldownUntil || 0) + '">Upvote</button>' + (e.winner ? '<span class="winner-worked" data-winner-since="' + (e.winnerTs || 0) + '"></span>' : '') + '</div>' +
+          '<div class="meta"><span>' + e.votes + ' votes | ' + e.upvotes + ' supers | ' + e.odds.toFixed(1) + '% | +' + e.votesPerHour.toFixed(0) + '/hr</span>' + classButton + '<button class="upvote-btn" data-entry-key="' + e.entryKey + '" data-winner="' + (e.winner ? '1' : '0') + '" data-cooldown-until="' + (e.upvoteCooldownUntil || 0) + '">Upvote</button>' + (e.winner ? '<span class="winner-worked" data-winner-since="' + (e.winnerTs || 0) + '"></span>' : '') + '</div>' +
         '</div>' +
       '</div>';
   }
@@ -653,9 +793,47 @@ async function submitUpvote(entryKey){
 
 document.addEventListener('click', function(evt){
   var target = evt.target;
-  if (!target || !target.classList || !target.classList.contains('upvote-btn')) return;
-  var key = target.getAttribute('data-entry-key') || '';
-  submitUpvote(key);
+  if (!target || !target.classList) return;
+
+  if (target.id === 'classificationPopClose') {
+    var closePop = document.getElementById('classificationPop');
+    if (closePop) closePop.classList.remove('is-open');
+    return;
+  }
+
+  if (target.classList.contains('classify-btn') && !target.disabled) {
+    var pop = document.getElementById('classificationPop');
+    var bodyEl = document.getElementById('classificationBody');
+    if (!pop || !bodyEl) return;
+    var about = null;
+    try { about = JSON.parse(target.getAttribute('data-about') || '{}'); } catch (_e) { about = null; }
+    var keys = [
+      'detected_subject',
+      'topic',
+      'subtopic',
+      'difficulty_1_to_10',
+      'estimated_time_minutes',
+      'estimated_grade_level',
+      'question_type',
+      'confidence',
+      'reason_for_rating'
+    ];
+    var html = '';
+    function label(key){ return String(key).replace(/_/g, ' ').replace(/\b\w/g, function(ch){ return ch.toUpperCase(); }); }
+    for (var i=0; i<keys.length; i++) {
+      var key = keys[i];
+      if (!about || !Object.prototype.hasOwnProperty.call(about, key)) continue;
+      html += '<dt>' + safeText(label(key)) + '</dt><dd>' + safeText(about[key]) + '</dd>';
+    }
+    bodyEl.innerHTML = html || '<dt>Status</dt><dd>Unavailable</dd>';
+    pop.classList.add('is-open');
+    return;
+  }
+
+  if (target.classList.contains('upvote-btn')) {
+    var key = target.getAttribute('data-entry-key') || '';
+    submitUpvote(key);
+  }
 });
 
 async function fetchSpin(){
